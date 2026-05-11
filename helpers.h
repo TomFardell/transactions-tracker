@@ -3,11 +3,6 @@
 
 #include <stdnoreturn.h>
 
-#define statement(s) \
-  do {               \
-    s;               \
-  } while (false)
-
 #define abort(...) statement(_abort(__FILE__, __LINE__, __func__, __VA_ARGS__))
 noreturn void _abort(const char *file, int line, const char *func, ...);
 

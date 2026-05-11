@@ -8,6 +8,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "base/definitions.h"
+#include "base/string.h"
 #include "helpers.h"
 
 void web_server(void) {
@@ -26,7 +28,22 @@ void web_server(void) {
   int incoming_sockfd = error_check_int(accept(server_sockfd, (struct sockaddr *)&their_addr, &their_addr_size));
   printf("Accepted connection, sockfd %d\n", incoming_sockfd);
 
-  const char *message = "HTTP/1.0 200 OK\r\n\r\n<h1>Hello</h1><p>This is some smaller text</p>";
+  char buffer[10000] = {0};
+  recv(incoming_sockfd, buffer, sizeof(buffer), 0);
+
+  String recv_str = string_init_cstring(buffer);
+  Arena split_arena = arena_init(10000);
+  StringArray split = string_split(&split_arena, recv_str, string_literal("\n"));
+
+  printf("\n");
+  for (U64 i = 0; i < split.count; ++i) {
+    printf("%02" U64f ": %s\n", i, string_get_cstring(&split_arena, split.data[i]));
+  }
+  printf("\n");
+
+  arena_free(&split_arena);
+
+  const char *message = "HTTP/1.1 200 OK\r\n\r\n<h1>Hello</h1><p>This is some smaller text</p>";
   send(incoming_sockfd, message, strlen(message), 0);
   printf("Sent message\n");
 
@@ -34,6 +51,7 @@ void web_server(void) {
   printf("Closed connection\n");
 
   close(server_sockfd);
+  printf("Closed server\n");
 }
 
 int main(void) {
