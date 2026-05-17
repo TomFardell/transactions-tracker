@@ -12,7 +12,7 @@ $(EXE): $(OBJECTS)
 	$(CC) $(CLFAGS) $(EXTRAFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(EXE) *.o *.out
+	rm -f $(EXE) *.o *.out base/*.o
 
 build: $(EXE)
 

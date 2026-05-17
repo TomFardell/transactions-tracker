@@ -39,10 +39,18 @@ void _error_check(const char *file, int line, const char *func, int status) {
   }
 }
 
-int _error_check_int(const char *file, int line, const char *func, int resuslt) {
-  if (resuslt == -1) {
+int _error_check_int(const char *file, int line, const char *func, int result) {
+  if (result == -1) {
     _abort(file, line, func, "Error check failed");
   }
 
-  return resuslt;
+  return result;
+}
+
+ssize_t _error_check_ssize_t(const char *file, int line, const char *func, ssize_t result) {
+  if (result == -1) {
+    _abort(file, line, func, "Error check failed");
+  }
+
+  return result;
 }
