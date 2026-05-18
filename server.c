@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <stdbool.h>
@@ -18,10 +19,10 @@
 #define BUFFER_SIZE 10000
 
 const char *port = "3490";
-const U64 general_arena_size = 10000;
+const U64 string_arena_size = 10000;
 const U32 backlog_size = 10;
 
-// Initialise and bind a server to a given port on this machine
+// Initialise and bind a server to a given port on this machine, returning its socket file descriptor
 int server_init(const char *service) {
   struct addrinfo hints = {.ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM, .ai_flags = AI_PASSIVE};
   struct addrinfo *info;
@@ -82,10 +83,99 @@ void send_file(int sockfd, int fd, size_t file_size) {
   }
 }
 
-void web_server(void) {
-  char buffer[BUFFER_SIZE];
-  Arena general_arena = arena_init(general_arena_size);
+void send_page(int sockfd, int pagefd) {
+  struct stat file_stat;
+  error_check(fstat(pagefd, &file_stat));
+  off_t page_size = file_stat.st_size;
 
+  send_file(sockfd, pagefd, page_size);
+}
+
+void send_404(int sockfd, const char *file_path) {
+  int pagefd = error_check_int(open(file_path, O_RDONLY));
+
+  const char *message = "HTTP/1.1 404 Not Found\r\n\r\n";
+  send_data(sockfd, message, strlen(message));
+  send_page(sockfd, pagefd);
+  printf("Sent 404 with file '%s'\n", file_path);
+
+  error_check(close(pagefd));
+  printf("Closed file\n");
+}
+
+void send_200(int sockfd, const char *file_path) {
+  int pagefd = error_check_int(open(file_path, O_RDONLY));
+
+  const char *message = "HTTP/1.1 200 OK\r\n\r\n";
+  send_data(sockfd, message, strlen(message));
+  send_page(sockfd, pagefd);
+  printf("Sent 200 with file '%s'\n", file_path);
+
+  error_check(close(pagefd));
+  printf("Closed file\n");
+}
+
+// Given a socket file descriptor for an accepted incoming connection, serve the requested pages
+void handle_client(int in_sockfd) {
+  char buffer[BUFFER_SIZE];
+
+  // If we received nothing, do nothing
+  if (recv_data(in_sockfd, buffer, sizeof(buffer)) == 0) {
+    return;
+  }
+
+  Arena string_arena = arena_init(string_arena_size);
+
+  String recv_str = string_init_cstring(buffer);
+  LinkNode *lines = string_split(&string_arena, recv_str, string_literal("\n"));
+
+  String request_line = link_node_get_container_node(lines->next, StringNode, node)->data;
+  LinkNode *request_words = string_split(&string_arena, request_line, string_literal(" "));
+  if (linked_list_get_length(request_words) != 3) {
+    printf("Unexpected request containing %" U64f " words\n", linked_list_get_length(request_words));
+
+    arena_free(&string_arena);
+    return;
+  }
+
+  String request_type = linked_list_get_container_node_at_index(request_words, 0, StringNode, node)->data;
+  String request_arg = linked_list_get_container_node_at_index(request_words, 1, StringNode, node)->data;
+  if (!string_equals(request_type, string_literal("GET"))) {
+    printf("Unexpected request type '%s'\n", string_get_cstring(&string_arena, request_type));
+
+    arena_free(&string_arena);
+    return;
+  }
+  if (request_arg.str[0] != '/') {
+    printf("Unexpected character in path '%s'\n", string_get_cstring(&string_arena, request_arg));
+
+    arena_free(&string_arena);
+    return;
+  }
+
+  String request_path = string_init_substring(request_arg, 1, request_arg.len);
+  request_path = string_prepend(&string_arena, request_path, string_literal("static/"));
+  printf("Client requested file '%s'\n", string_get_cstring(&string_arena, request_path));
+
+  if (access(string_get_cstring(&string_arena, request_path), R_OK) == -1) {
+    // If this error is anything other than just a non-existent file, abort
+    if (errno != ENOENT) {
+      error_check(-1);
+    }
+
+    printf("Unable to find file '%s'\n", string_get_cstring(&string_arena, request_path));
+    send_404(in_sockfd, "static/error.html");
+
+    arena_free(&string_arena);
+    return;
+  }
+
+  send_200(in_sockfd, string_get_cstring(&string_arena, request_path));
+
+  arena_free(&string_arena);
+}
+
+void web_server(void) {
   int server_sockfd = server_init(port);
   error_check(listen(server_sockfd, backlog_size));
   printf("Listening for connections\n");
@@ -96,68 +186,15 @@ void web_server(void) {
 
     int in_sockfd = error_check_int(accept(server_sockfd, (struct sockaddr *)&in_addr, &in_addr_size));
 
-    if (recv_data(in_sockfd, buffer, sizeof(buffer)) == 0) {
-      goto cleanup_incoming;
-    }
-
-    String recv_str = string_init_cstring(buffer);
-    LinkNode *lines_split_head = string_split(&general_arena, recv_str, string_literal("\n"));
-
-    String request_line = link_node_get_container_node(lines_split_head->next, StringNode, node)->data;
-    LinkNode *words_split_head = string_split(&general_arena, request_line, string_literal(" "));
-    if (linked_list_get_length(words_split_head) != 3) {
-      printf("Unexpected request containing %" U64f " words\n", linked_list_get_length(words_split_head));
-      goto cleanup_incoming;
-    }
-
-    String request_type = linked_list_get_container_node_at_index(words_split_head, 0, StringNode, node)->data;
-    String request_arg = linked_list_get_container_node_at_index(words_split_head, 1, StringNode, node)->data;
-    // TODO: split again on '&'
-    if (!string_equals(request_type, string_literal("GET"))) {
-      printf("Unexpected request type '%s'\n", string_get_cstring(&general_arena, request_type));
-      goto cleanup_incoming;
-    }
-    if (request_arg.str[0] != '/') {
-      printf("Unexpected character in path '%s'\n", string_get_cstring(&general_arena, request_arg));
-      goto cleanup_incoming;
-    }
-
-    String request_path = string_init_substring(request_arg, 1, request_arg.len);
-    printf("Requested file '%s'\n", string_get_cstring(&general_arena, request_path));
-
-    int page_fd = open(string_get_cstring(&general_arena, request_path), O_RDONLY);
-    if (page_fd == -1) {
-      printf("Unable to find file '%s'\n", string_get_cstring(&general_arena, request_path));
-      const char *message = "HTTP/1.1 404 Not Found\r\n\r\n";
-      send_data(in_sockfd, message, strlen(message));
-      printf("Sent 404\n");
-
-      goto cleanup_incoming;
-    }
-
-    struct stat file_stat;
-    error_check(fstat(page_fd, &file_stat));
-    off_t page_size = file_stat.st_size;
-
-    const char *message = "HTTP/1.1 200 OK\r\n\r\n";
-    send_data(in_sockfd, message, strlen(message));
-    send_file(in_sockfd, page_fd, page_size);
-    printf("Sent 200 with file '%s'\n", string_get_cstring(&general_arena, request_path));
-
-  cleanup_incoming:
-    if (page_fd != -1) {
-      error_check(close(page_fd));
-      printf("Closed file\n");
-    }
+    handle_client(in_sockfd);
 
     error_check(close(in_sockfd));
     printf("Closed connection\n");
   }
 
+  // I guess this is never hit :(
   error_check(close(server_sockfd));
   printf("Closed server\n");
-
-  arena_free(&general_arena);
 }
 
 int main(void) {
