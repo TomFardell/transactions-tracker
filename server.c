@@ -15,43 +15,47 @@
 #include "base/string.h"
 #include "helpers.h"
 
-#define PORT "3490"
 #define BUFFER_SIZE 10000
-#define ARENA_SIZE 100000
 
+const char *port = "3490";
+const U64 general_arena_size = 10000;
+const U32 backlog_size = 10;
+
+// Initialise and bind a server to a given port on this machine
 int server_init(const char *service) {
   struct addrinfo hints = {.ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM, .ai_flags = AI_PASSIVE};
   struct addrinfo *info;
   error_check(getaddrinfo(NULL, service, &hints, &info));
-  printf("Got addrinfo\n");
 
   int sockfd = error_check_int(socket(info->ai_family, info->ai_socktype, info->ai_protocol));
   error_check(bind(sockfd, info->ai_addr, info->ai_addrlen));
-  printf("Bound socket\n");
 
   const int yes = 0;
   error_check(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)));
-  printf("Set socket option\n");
 
   freeaddrinfo(info);
 
   return sockfd;
 }
 
-// Make repeated recv calls to read all incoming data on a given socket into a buffer
-void recv_data(int sockfd, char *buffer, size_t buffer_size) {
-  size_t buffer_pos = 0;
+// Make repeated recv calls to read incoming data on a socket into a buffer, returning the number of bytes read
+ssize_t recv_data(int sockfd, char *buffer, size_t buffer_size) {
+  ssize_t buffer_pos = 0;
 
-  while (buffer_pos < buffer_size) {
+  while (buffer_pos < (ssize_t)buffer_size) {
     buffer_pos += error_check_ssize_t(recv(sockfd, buffer + buffer_pos, buffer_size - buffer_pos, 0));
 
+    if (buffer_pos == 0) {
+      printf("Received empty message\n");
+      return 0;
+    }
     if (buffer_pos < 4) {
       abort("Recieved message of invalid size %zu", buffer_pos);
     }
 
     String terminator = string_init((U8 *)(buffer + buffer_pos) - 4, 4);
     if (string_equals(terminator, string_literal("\r\n\r\n"))) {
-      return;
+      return buffer_pos;
     }
   }
 
@@ -68,6 +72,7 @@ void send_data(int sockfd, const char *buffer, size_t buffer_size) {
   }
 }
 
+// Make repeated sendfile calls to send a file on a given socket
 void send_file(int sockfd, int fd, size_t file_size) {
   size_t total_bytes_sent = 0;
   ssize_t num_bytes_sent;
@@ -78,12 +83,10 @@ void send_file(int sockfd, int fd, size_t file_size) {
 }
 
 void web_server(void) {
-  const int backlog_size = 10;
-
   char buffer[BUFFER_SIZE];
-  Arena general_arena = arena_init(ARENA_SIZE);
+  Arena general_arena = arena_init(general_arena_size);
 
-  int server_sockfd = server_init(PORT);
+  int server_sockfd = server_init(port);
   error_check(listen(server_sockfd, backlog_size));
   printf("Listening for connections\n");
 
@@ -92,28 +95,44 @@ void web_server(void) {
     socklen_t in_addr_size = sizeof(in_addr);
 
     int in_sockfd = error_check_int(accept(server_sockfd, (struct sockaddr *)&in_addr, &in_addr_size));
-    recv_data(in_sockfd, buffer, sizeof(buffer));
+
+    if (recv_data(in_sockfd, buffer, sizeof(buffer)) == 0) {
+      goto cleanup_incoming;
+    }
 
     String recv_str = string_init_cstring(buffer);
-    LinkNode *split_head = string_split(&general_arena, recv_str, string_literal("\n"));
+    LinkNode *lines_split_head = string_split(&general_arena, recv_str, string_literal("\n"));
 
-    printf("\n");
-    U32 i = 0;
-    for (LinkNode *curr = split_head->next; curr != split_head; curr = curr->next, ++i) {
-      String curr_string = link_node_get_container_node(curr, StringNode, node)->data;
-      printf("%02" U32f ": %s\n", i, string_get_cstring(&general_arena, curr_string));
+    String request_line = link_node_get_container_node(lines_split_head->next, StringNode, node)->data;
+    LinkNode *words_split_head = string_split(&general_arena, request_line, string_literal(" "));
+    if (linked_list_get_length(words_split_head) != 3) {
+      printf("Unexpected request containing %" U64f " words\n", linked_list_get_length(words_split_head));
+      goto cleanup_incoming;
     }
-    printf("\n");
 
-    int page_fd = open("index.html", O_RDONLY);
+    String request_type = linked_list_get_container_node_at_index(words_split_head, 0, StringNode, node)->data;
+    String request_arg = linked_list_get_container_node_at_index(words_split_head, 1, StringNode, node)->data;
+    // TODO: split again on '&'
+    if (!string_equals(request_type, string_literal("GET"))) {
+      printf("Unexpected request type '%s'\n", string_get_cstring(&general_arena, request_type));
+      goto cleanup_incoming;
+    }
+    if (request_arg.str[0] != '/') {
+      printf("Unexpected character in path '%s'\n", string_get_cstring(&general_arena, request_arg));
+      goto cleanup_incoming;
+    }
+
+    String request_path = string_init_substring(request_arg, 1, request_arg.len);
+    printf("Requested file '%s'\n", string_get_cstring(&general_arena, request_path));
+
+    int page_fd = open(string_get_cstring(&general_arena, request_path), O_RDONLY);
     if (page_fd == -1) {
+      printf("Unable to find file '%s'\n", string_get_cstring(&general_arena, request_path));
       const char *message = "HTTP/1.1 404 Not Found\r\n\r\n";
       send_data(in_sockfd, message, strlen(message));
       printf("Sent 404\n");
 
-      error_check(close(in_sockfd));
-      printf("Closed connection\n");
-      continue;
+      goto cleanup_incoming;
     }
 
     struct stat file_stat;
@@ -123,10 +142,13 @@ void web_server(void) {
     const char *message = "HTTP/1.1 200 OK\r\n\r\n";
     send_data(in_sockfd, message, strlen(message));
     send_file(in_sockfd, page_fd, page_size);
-    printf("Sent 200\n");
+    printf("Sent 200 with file '%s'\n", string_get_cstring(&general_arena, request_path));
 
-    error_check(close(page_fd));
-    printf("Closed file\n");
+  cleanup_incoming:
+    if (page_fd != -1) {
+      error_check(close(page_fd));
+      printf("Closed file\n");
+    }
 
     error_check(close(in_sockfd));
     printf("Closed connection\n");
