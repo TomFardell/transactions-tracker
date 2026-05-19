@@ -16,6 +16,9 @@ int _error_check_int(const char *file, int line, const char *func, int result);
 #define error_check_ssize_t(result) _error_check_ssize_t(__FILE__, __LINE__, __func__, result)
 ssize_t _error_check_ssize_t(const char *file, int line, const char *func, ssize_t result);
 
+#define error_check_ptr(result) _error_check_ptr(__FILE__, __LINE__, __func__, result)
+void *_error_check_ptr(const char *file, int line, const char *func, void *result);
+
 #endif  // HELPERS_H
 
 // vim: filetype=c :

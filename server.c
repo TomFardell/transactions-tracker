@@ -1,5 +1,4 @@
 #include <arpa/inet.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <stdbool.h>
@@ -16,11 +15,63 @@
 #include "base/string.h"
 #include "helpers.h"
 
-#define BUFFER_SIZE 10000
+#define RECV_BUFFER_SIZE 10000
 
+const String static_path = string_literal("static/");
+const String not_found_file = string_literal("error.html");
+const String allowed_files_file = string_literal("allowed.dat");
 const char *port = "3490";
-const U64 string_arena_size = 10000;
-const U32 backlog_size = 10;
+
+// Read the allowed files from the file and store in a linked list in a given arena
+LinkNode *get_allowed_files(Arena *result_arena) {
+  const U64 arena_size = 200;
+  Arena string_arena = arena_init(arena_size);
+  String allowed_files_path = string_append(&string_arena, static_path, allowed_files_file);
+  FILE *allowed_file = error_check_ptr(fopen(string_get_cstring(&string_arena, allowed_files_path), "r"));
+  arena_free(&string_arena);
+
+  LinkNode *head = arena_alloc_single(result_arena, LinkNode);
+  linked_list_init(head);
+
+  for (char *string_start; (string_start = fgets((char *)result_arena->base_pos + result_arena->offset,
+                                                 result_arena->capacity - result_arena->offset, allowed_file));) {
+    // Manually increment the arena offset to sit on the newline or null-terminator. We are happy for the next
+    // arena allocation to overwrite either of these
+    for (++result_arena->offset; result_arena->base_pos[result_arena->offset] != '\0' &&
+                                 result_arena->base_pos[result_arena->offset] != '\n';
+         ++result_arena->offset) {
+      if (result_arena->offset >= result_arena->capacity) {
+        abort("Trying to access index %" U64f " of an arena of capacity %" U64f, result_arena->offset,
+              result_arena->capacity);
+      }
+    }
+
+    String this_string =
+        string_init((U8 *)string_start, result_arena->base_pos + result_arena->offset - (U8 *)string_start);
+    this_string = string_append(result_arena, static_path, this_string);
+
+    StringNode *this_node = arena_alloc_single(result_arena, StringNode);
+    this_node->data = this_string;
+    linked_list_push_back(head, &(this_node->node));
+  }
+
+  error_check(fclose(allowed_file));
+
+  return head;
+}
+
+// Given a linked list of allowed files, see whether a file path is allowed
+bool can_access_file(String file_path, const LinkNode *allowed_files) {
+  for (LinkNode *file = allowed_files->next; file != allowed_files; file = file->next) {
+    String this_allowed_file = link_node_get_container_node(file, StringNode, node)->data;
+
+    if (string_equals(file_path, this_allowed_file)) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 // Initialise and bind a server to a given port on this machine, returning its socket file descriptor
 int server_init(const char *service) {
@@ -116,15 +167,16 @@ void send_200(int sockfd, const char *file_path) {
 }
 
 // Given a socket file descriptor for an accepted incoming connection, serve the requested pages
-void handle_client(int in_sockfd) {
-  char buffer[BUFFER_SIZE];
+void handle_client(int in_sockfd, const LinkNode *allowed_files) {
+  char buffer[RECV_BUFFER_SIZE];
 
   // If we received nothing, do nothing
   if (recv_data(in_sockfd, buffer, sizeof(buffer)) == 0) {
     return;
   }
 
-  Arena string_arena = arena_init(string_arena_size);
+  U64 arena_size = 2000;
+  Arena string_arena = arena_init(arena_size);
 
   String recv_str = string_init_cstring(buffer);
   LinkNode *lines = string_split(&string_arena, recv_str, string_literal("\n"));
@@ -153,30 +205,31 @@ void handle_client(int in_sockfd) {
     return;
   }
 
-  String request_path = string_init_substring(request_arg, 1, request_arg.len);
-  request_path = string_prepend(&string_arena, request_path, string_literal("static/"));
-  printf("Client requested file '%s'\n", string_get_cstring(&string_arena, request_path));
+  String requested_file = string_init_substring(request_arg, 1, request_arg.len);
+  requested_file = string_append(&string_arena, static_path, requested_file);
+  printf("Client requested file '%s'\n", string_get_cstring(&string_arena, requested_file));
 
-  if (access(string_get_cstring(&string_arena, request_path), R_OK) == -1) {
-    // If this error is anything other than just a non-existent file, abort
-    if (errno != ENOENT) {
-      error_check(-1);
-    }
-
-    printf("Unable to find file '%s'\n", string_get_cstring(&string_arena, request_path));
-    send_404(in_sockfd, "static/error.html");
+  if (!can_access_file(requested_file, allowed_files)) {
+    printf("Unable to find file '%s'\n", string_get_cstring(&string_arena, requested_file));
+    String not_found_path = string_append(&string_arena, static_path, not_found_file);
+    send_404(in_sockfd, string_get_cstring(&string_arena, not_found_path));
 
     arena_free(&string_arena);
     return;
   }
 
-  send_200(in_sockfd, string_get_cstring(&string_arena, request_path));
+  send_200(in_sockfd, string_get_cstring(&string_arena, requested_file));
 
   arena_free(&string_arena);
 }
 
 void web_server(void) {
+  U64 arena_size = 400;
+  Arena general_arena = arena_init(arena_size);
+  LinkNode *allowed_files = get_allowed_files(&general_arena);
+
   int server_sockfd = server_init(port);
+  U32 backlog_size = 10;
   error_check(listen(server_sockfd, backlog_size));
   printf("Listening for connections\n");
 
@@ -186,7 +239,7 @@ void web_server(void) {
 
     int in_sockfd = error_check_int(accept(server_sockfd, (struct sockaddr *)&in_addr, &in_addr_size));
 
-    handle_client(in_sockfd);
+    handle_client(in_sockfd, allowed_files);
 
     error_check(close(in_sockfd));
     printf("Closed connection\n");
@@ -195,6 +248,8 @@ void web_server(void) {
   // I guess this is never hit :(
   error_check(close(server_sockfd));
   printf("Closed server\n");
+
+  arena_free(&general_arena);
 }
 
 int main(void) {

@@ -54,3 +54,11 @@ ssize_t _error_check_ssize_t(const char *file, int line, const char *func, ssize
 
   return result;
 }
+
+void *_error_check_ptr(const char *file, int line, const char *func, void *result) {
+  if (result == NULL) {
+    _abort(file, line, func, "Error check failed");
+  }
+
+  return result;
+}
