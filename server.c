@@ -19,58 +19,21 @@
 
 const String static_path = string_literal("static/");
 const String not_found_file = string_literal("error.html");
-const String allowed_files_file = string_literal("allowed.dat");
 const char *port = "3490";
 
-// Read the allowed files from the file and store in a linked list in a given arena
-LinkNode *get_allowed_files(Arena *result_arena) {
-  const U64 arena_size = 200;
-  Arena string_arena = arena_init(arena_size);
-  String allowed_files_path = string_append(&string_arena, static_path, allowed_files_file);
-  FILE *allowed_file = error_check_ptr(fopen(string_get_cstring(&string_arena, allowed_files_path), "r"));
+// Get whether a file can be accessed by a client
+bool can_access_file(String file_path) {
+  // Don't allow requests that traverse out the directory
+  if (string_contains(file_path, string_literal("../"))) {
+    return false;
+  }
+
+  // Check if the file exists and is accessible
+  Arena string_arena = arena_init(file_path.len + 1);
+  int access_return = access(string_get_cstring(&string_arena, file_path), R_OK);
   arena_free(&string_arena);
 
-  LinkNode *head = arena_alloc_single(result_arena, LinkNode);
-  linked_list_init(head);
-
-  for (char *string_start; (string_start = fgets((char *)result_arena->base_pos + result_arena->offset,
-                                                 result_arena->capacity - result_arena->offset, allowed_file));) {
-    // Manually increment the arena offset to sit on the newline or null-terminator. We are happy for the next
-    // arena allocation to overwrite either of these
-    for (++result_arena->offset; result_arena->base_pos[result_arena->offset] != '\0' &&
-                                 result_arena->base_pos[result_arena->offset] != '\n';
-         ++result_arena->offset) {
-      if (result_arena->offset >= result_arena->capacity) {
-        abort("Trying to access index %" U64f " of an arena of capacity %" U64f, result_arena->offset,
-              result_arena->capacity);
-      }
-    }
-
-    String this_string =
-        string_init((U8 *)string_start, result_arena->base_pos + result_arena->offset - (U8 *)string_start);
-    this_string = string_append(result_arena, static_path, this_string);
-
-    StringNode *this_node = arena_alloc_single(result_arena, StringNode);
-    this_node->data = this_string;
-    linked_list_push_back(head, &(this_node->node));
-  }
-
-  error_check(fclose(allowed_file));
-
-  return head;
-}
-
-// Given a linked list of allowed files, see whether a file path is allowed
-bool can_access_file(String file_path, const LinkNode *allowed_files) {
-  for (LinkNode *file = allowed_files->next; file != allowed_files; file = file->next) {
-    String this_allowed_file = link_node_get_container_node(file, StringNode, node)->data;
-
-    if (string_equals(file_path, this_allowed_file)) {
-      return true;
-    }
-  }
-
-  return false;
+  return (access_return != -1);
 }
 
 // Initialise and bind a server to a given port on this machine, returning its socket file descriptor
@@ -167,7 +130,7 @@ void send_200(int sockfd, const char *file_path) {
 }
 
 // Given a socket file descriptor for an accepted incoming connection, serve the requested pages
-void handle_client(int in_sockfd, const LinkNode *allowed_files) {
+void handle_client(int in_sockfd) {
   char buffer[RECV_BUFFER_SIZE];
 
   // If we received nothing, do nothing
@@ -209,9 +172,12 @@ void handle_client(int in_sockfd, const LinkNode *allowed_files) {
   requested_file = string_append(&string_arena, static_path, requested_file);
   printf("Client requested file '%s'\n", string_get_cstring(&string_arena, requested_file));
 
-  if (!can_access_file(requested_file, allowed_files)) {
-    printf("Unable to find file '%s'\n", string_get_cstring(&string_arena, requested_file));
+  if (!can_access_file(requested_file)) {
+    printf("Unable to access file '%s'\n", string_get_cstring(&string_arena, requested_file));
     String not_found_path = string_append(&string_arena, static_path, not_found_file);
+    if (!can_access_file(not_found_path)) {
+      abort("Unable to access Not Found file '%s'", string_get_cstring(&string_arena, not_found_path));
+    }
     send_404(in_sockfd, string_get_cstring(&string_arena, not_found_path));
 
     arena_free(&string_arena);
@@ -224,10 +190,6 @@ void handle_client(int in_sockfd, const LinkNode *allowed_files) {
 }
 
 void web_server(void) {
-  U64 arena_size = 400;
-  Arena general_arena = arena_init(arena_size);
-  LinkNode *allowed_files = get_allowed_files(&general_arena);
-
   int server_sockfd = server_init(port);
   U32 backlog_size = 10;
   error_check(listen(server_sockfd, backlog_size));
@@ -239,7 +201,7 @@ void web_server(void) {
 
     int in_sockfd = error_check_int(accept(server_sockfd, (struct sockaddr *)&in_addr, &in_addr_size));
 
-    handle_client(in_sockfd, allowed_files);
+    handle_client(in_sockfd);
 
     error_check(close(in_sockfd));
     printf("Closed connection\n");
@@ -248,8 +210,6 @@ void web_server(void) {
   // I guess this is never hit :(
   error_check(close(server_sockfd));
   printf("Closed server\n");
-
-  arena_free(&general_arena);
 }
 
 int main(void) {
