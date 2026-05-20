@@ -2,7 +2,9 @@ CC=gcc
 CFLAGS=-g3 -Wall -std=c17
 LDFLAGS=
 
-OBJECTS=server.o helpers.o base/base.o
+SRC=src
+BASE=$(SRC)/base
+OBJECTS=$(SRC)/server.o $(SRC)/helpers.o $(BASE)/base.o
 EXE=server 
 
 $(EXE): $(OBJECTS)
@@ -12,7 +14,7 @@ $(EXE): $(OBJECTS)
 	$(CC) $(CLFAGS) $(EXTRAFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(EXE) *.o *.out base/*.o
+	rm -f $(EXE) *.o $(SRC)/*.o $(BASE)/*.o
 
 build: $(EXE)
 
