@@ -4,18 +4,23 @@ LDFLAGS=
 
 SRC=src
 BASE=$(SRC)/base
-OBJECTS=$(SRC)/server.o $(SRC)/helpers.o $(BASE)/base.o
-EXE=server 
 
-$(EXE): $(OBJECTS)
+SHARED=$(SRC)/network.o $(SRC)/helpers.o $(BASE)/base.o $(SRC)/constants.o
+SERVER=$(SRC)/server.o
+SEND_REQUEST=$(SRC)/send_request.o
+
+build: server send_request
+
+server: $(SERVER) $(SHARED)
+	$(CC) $(CFLAGS) $(EXTRAFLAGS) -o $@ $^ $(LDFLAGS)
+
+send_request: $(SEND_REQUEST) $(SHARED)
 	$(CC) $(CFLAGS) $(EXTRAFLAGS) -o $@ $^ $(LDFLAGS)
 
 %.o: %.c
 	$(CC) $(CLFAGS) $(EXTRAFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(EXE) *.o $(SRC)/*.o $(BASE)/*.o
-
-build: $(EXE)
+	rm -f server send_request *.o $(SRC)/*.o $(BASE)/*.o
 
 .PHONY: build  clean

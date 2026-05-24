@@ -1,0 +1,27 @@
+body {
+  color: darkSlateGrey;
+  background-color: whiteSmoke;
+  font-family: Helvetica, Verdana
+}
+
+.main-title {
+}
+
+.sub-title {
+}
+
+.info {
+  width: 100px;
+  border: medium solid lightGrey;
+  border-radius: 3px;
+  background-color: lightGrey;
+  padding: 2px;
+}
+
+.table {
+  border-style: medium solid lightGrey;
+  border-radius: 3px;
+  background-color: lightGrey;
+  padding: 2px
+}
+

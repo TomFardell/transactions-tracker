@@ -3,7 +3,6 @@
 #include <netdb.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/sendfile.h>
 #include <sys/socket.h>
@@ -13,13 +12,14 @@
 
 #include "base/definitions.h"
 #include "base/string.h"
+#include "constants.h"
 #include "helpers.h"
+#include "network.h"
 
-#define RECV_BUFFER_SIZE 10000
+#define RECV_BUFFER_SIZE 256
 
 const String static_path = string_literal("static/");
 const String not_found_file = string_literal("error.html");
-const char *port = "3490";
 
 // Get whether a file can be accessed by a client
 bool can_access_file(String file_path) {
@@ -53,101 +53,50 @@ int server_init(const char *service) {
   return sockfd;
 }
 
-// Make repeated recv calls to read incoming data on a socket into a buffer, returning the number of bytes read
-ssize_t recv_data(int sockfd, char *buffer, size_t buffer_size) {
-  ssize_t buffer_pos = 0;
-
-  while (buffer_pos < (ssize_t)buffer_size) {
-    buffer_pos += error_check_ssize_t(recv(sockfd, buffer + buffer_pos, buffer_size - buffer_pos, 0));
-
-    if (buffer_pos == 0) {
-      printf("Received empty message\n");
-      return 0;
-    }
-    if (buffer_pos < 4) {
-      abort("Recieved message of invalid size %zu", buffer_pos);
-    }
-
-    String terminator = string_init((U8 *)(buffer + buffer_pos) - 4, 4);
-    if (string_equals(terminator, string_literal("\r\n\r\n"))) {
-      return buffer_pos;
-    }
-  }
-
-  abort("Buffer of size %zu not large enough to hold message of size %zu", buffer_size, buffer_pos);
-}
-
-// Make repeated send calls to send an entire buffer of data on a given socket
-void send_data(int sockfd, const char *buffer, size_t buffer_size) {
-  size_t buffer_pos = 0;
-  ssize_t num_bytes_sent;
-
-  for (; buffer_pos < buffer_size; buffer_pos += num_bytes_sent) {
-    num_bytes_sent = error_check_ssize_t(send(sockfd, buffer + buffer_pos, buffer_size - buffer_pos, 0));
-  }
-}
-
-// Make repeated sendfile calls to send a file on a given socket
-void send_file(int sockfd, int fd, size_t file_size) {
-  size_t total_bytes_sent = 0;
-  ssize_t num_bytes_sent;
-
-  for (; total_bytes_sent < file_size; total_bytes_sent += num_bytes_sent) {
-    num_bytes_sent = error_check_ssize_t(sendfile(sockfd, fd, NULL, file_size));
-  }
-}
-
-void send_page(int sockfd, int pagefd) {
-  struct stat file_stat;
-  error_check(fstat(pagefd, &file_stat));
-  off_t page_size = file_stat.st_size;
-
-  send_file(sockfd, pagefd, page_size);
-}
-
 void send_404(int sockfd, const char *file_path) {
   int pagefd = error_check_int(open(file_path, O_RDONLY));
+  printf("Opened file '%s' for sending\n", file_path);
 
   const char *message = "HTTP/1.1 404 Not Found\r\n\r\n";
   send_data(sockfd, message, strlen(message));
-  send_page(sockfd, pagefd);
+  send_file(sockfd, pagefd);
   printf("Sent 404 with file '%s'\n", file_path);
 
   error_check(close(pagefd));
-  printf("Closed file\n");
+  printf("Closed file '%s'\n", file_path);
 }
 
 void send_200(int sockfd, const char *file_path) {
   int pagefd = error_check_int(open(file_path, O_RDONLY));
+  printf("Opened file '%s' for sending\n", file_path);
 
   const char *message = "HTTP/1.1 200 OK\r\n\r\n";
   send_data(sockfd, message, strlen(message));
-  send_page(sockfd, pagefd);
+  send_file(sockfd, pagefd);
   printf("Sent 200 with file '%s'\n", file_path);
 
   error_check(close(pagefd));
-  printf("Closed file\n");
+  printf("Closed file '%s'\n", file_path);
 }
 
-// Given a socket file descriptor for an accepted incoming connection, serve the requested pages
+// Given a socket file descriptor for an accepted incoming connection, receive and handle a single request
 void handle_client(int in_sockfd) {
   char buffer[RECV_BUFFER_SIZE];
 
-  // If we received nothing, do nothing
-  if (recv_data(in_sockfd, buffer, sizeof(buffer)) == 0) {
+  ssize_t request_size = recv_request(in_sockfd, buffer, sizeof(buffer));
+  if (request_size == -1) {
+    printf("Ignoring empty, unterminated or too-long request\n");
     return;
   }
 
-  U64 arena_size = 2000;
+  String recv_str = string_init((U8 *)buffer, request_size);
+
+  U64 arena_size = 2048;
   Arena string_arena = arena_init(arena_size);
 
-  String recv_str = string_init_cstring(buffer);
-  LinkNode *lines = string_split(&string_arena, recv_str, string_literal("\n"));
-
-  String request_line = link_node_get_container_node(lines->next, StringNode, node)->data;
-  LinkNode *request_words = string_split(&string_arena, request_line, string_literal(" "));
+  LinkNode *request_words = string_split(&string_arena, recv_str, string_literal(" "));
   if (linked_list_get_length(request_words) != 3) {
-    printf("Unexpected request containing %" U64f " words\n", linked_list_get_length(request_words));
+    printf("Ignoring request containing %" U64f " words\n", linked_list_get_length(request_words));
 
     arena_free(&string_arena);
     return;
@@ -156,13 +105,13 @@ void handle_client(int in_sockfd) {
   String request_type = linked_list_get_container_node_at_index(request_words, 0, StringNode, node)->data;
   String request_arg = linked_list_get_container_node_at_index(request_words, 1, StringNode, node)->data;
   if (!string_equals(request_type, string_literal("GET"))) {
-    printf("Unexpected request type '%s'\n", string_get_cstring(&string_arena, request_type));
+    printf("Ignoring unexpected request of type '%s'\n", string_get_cstring(&string_arena, request_type));
 
     arena_free(&string_arena);
     return;
   }
   if (request_arg.str[0] != '/') {
-    printf("Unexpected character in path '%s'\n", string_get_cstring(&string_arena, request_arg));
+    printf("Ignoring request with unexpected arg '%s'\n", string_get_cstring(&string_arena, request_arg));
 
     arena_free(&string_arena);
     return;
@@ -170,10 +119,12 @@ void handle_client(int in_sockfd) {
 
   String requested_file = string_init_substring(request_arg, 1, request_arg.len);
   requested_file = string_append(&string_arena, static_path, requested_file);
-  printf("Client requested file '%s'\n", string_get_cstring(&string_arena, requested_file));
+  printf("Client made %s request for '%s' (maps to '%s')\n", string_get_cstring(&string_arena, request_type),
+         string_get_cstring(&string_arena, request_arg), string_get_cstring(&string_arena, requested_file));
 
   if (!can_access_file(requested_file)) {
     printf("Unable to access file '%s'\n", string_get_cstring(&string_arena, requested_file));
+
     String not_found_path = string_append(&string_arena, static_path, not_found_file);
     if (!can_access_file(not_found_path)) {
       abort("Unable to access Not Found file '%s'", string_get_cstring(&string_arena, not_found_path));
@@ -185,26 +136,39 @@ void handle_client(int in_sockfd) {
   }
 
   send_200(in_sockfd, string_get_cstring(&string_arena, requested_file));
-
   arena_free(&string_arena);
+  return;
 }
 
 void web_server(void) {
-  int server_sockfd = server_init(port);
+  int server_sockfd = server_init(PORT);
   U32 backlog_size = 10;
   error_check(listen(server_sockfd, backlog_size));
   printf("Listening for connections\n");
+  printf("\n");
 
   while (true) {
-    struct sockaddr_in in_addr;
+    struct sockaddr_storage in_addr;
     socklen_t in_addr_size = sizeof(in_addr);
 
     int in_sockfd = error_check_int(accept(server_sockfd, (struct sockaddr *)&in_addr, &in_addr_size));
+    if (in_addr.ss_family == AF_INET) {
+      char ip_pres[INET_ADDRSTRLEN];
+      inet_ntop(in_addr.ss_family, &(((struct sockaddr_in *)(&in_addr))->sin_addr), ip_pres, sizeof(ip_pres));
+      printf("Accepted connection from IPv4 %s:%hu\n", ip_pres, ((struct sockaddr_in *)&in_addr)->sin_port);
+    } else if (in_addr.ss_family == AF_INET6) {
+      char ip_pres[INET6_ADDRSTRLEN];
+      inet_ntop(in_addr.ss_family, &(((struct sockaddr_in6 *)(&in_addr))->sin6_addr), ip_pres, sizeof(ip_pres));
+      printf("Accepted connection from IPv6 %s:%hu\n", ip_pres, ((struct sockaddr_in6 *)&in_addr)->sin6_port);
+    } else {
+      printf("Accepted unknown address\n");
+    }
 
     handle_client(in_sockfd);
 
     error_check(close(in_sockfd));
     printf("Closed connection\n");
+    printf("\n");
   }
 
   // I guess this is never hit :(

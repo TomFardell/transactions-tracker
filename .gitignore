@@ -1,3 +1,4 @@
 *.o
-server
 *.out
+server
+send_request

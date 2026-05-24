@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <stdnoreturn.h>
 
+#include "base/definitions.h"
+
 #define abort(...) statement(_abort(__FILE__, __LINE__, __func__, __VA_ARGS__))
 noreturn void _abort(const char *file, int line, const char *func, ...);
 
