@@ -1,6 +1,7 @@
 #ifndef HELPERS_H
 #define HELPERS_H
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdnoreturn.h>
 
@@ -20,6 +21,10 @@ ssize_t _error_check_ssize_t(const char *file, int line, const char *func, ssize
 
 #define error_check_ptr(result) _error_check_ptr(__FILE__, __LINE__, __func__, result)
 void *_error_check_ptr(const char *file, int line, const char *func, void *result);
+
+#define error_check_fread_fwrite(result, check_file) \
+  _error_check_fread_fwrite(__FILE__, __LINE__, __func__, result, check_file)
+size_t _error_check_fread_fwrite(const char *file, int line, const char *func, size_t result, FILE *check_file);
 
 #endif  // HELPERS_H
 

@@ -51,7 +51,7 @@ ssize_t recv_data(int sockfd, char *buffer, size_t buffer_size) {
 
 ssize_t recv_request(int sockfd, char *buffer, size_t buffer_size) {
   ssize_t message_size = error_check_ssize_t(recv(sockfd, buffer, buffer_size, 0));
-  String message_as_string = string_init((U8 *)buffer, message_size);
+  String message_as_string = string_init(buffer, message_size);
 
   U64 newline_pos = string_find_first(message_as_string, string_literal("\n"));
 

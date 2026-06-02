@@ -62,3 +62,12 @@ void *_error_check_ptr(const char *file, int line, const char *func, void *resul
 
   return result;
 }
+
+size_t _error_check_fread_fwrite(const char *file, int line, const char *func, size_t result, FILE *check_file) {
+  // fread and fwrite can return 0 but not be erroring in an end of file case
+  if (result == 0 && ferror(check_file)) {
+    _abort(file, line, func, "Error check failed");
+  }
+
+  return result;
+}

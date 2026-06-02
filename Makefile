@@ -5,7 +5,7 @@ LDFLAGS=
 SRC=src
 BASE=$(SRC)/base
 
-SHARED=$(SRC)/network.o $(SRC)/helpers.o $(BASE)/base.o $(SRC)/constants.o
+SHARED=$(SRC)/network.o $(SRC)/helpers.o $(BASE)/base.o $(SRC)/constants.o $(SRC)/storage.o $(SRC)/transaction.o
 SERVER=$(SRC)/server.o
 SEND_REQUEST=$(SRC)/send_request.o
 

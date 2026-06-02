@@ -1,4 +1,5 @@
 *.o
 *.out
+data
 server
 send_request

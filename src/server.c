@@ -10,11 +10,15 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "base/data.h"
+#include "base/date.h"
 #include "base/definitions.h"
 #include "base/string.h"
 #include "constants.h"
 #include "helpers.h"
 #include "network.h"
+#include "storage.h"
+#include "transaction.h"
 
 #define RECV_BUFFER_SIZE 256
 
@@ -22,7 +26,7 @@ const String static_path = string_literal("static/");
 const String not_found_file = string_literal("error.html");
 
 // Get whether a file can be accessed by a client
-bool can_access_file(String file_path) {
+bool can_access_file(const String file_path) {
   // Don't allow requests that traverse out the directory
   if (string_contains(file_path, string_literal("../"))) {
     return false;
@@ -89,7 +93,7 @@ void handle_client(int in_sockfd) {
     return;
   }
 
-  String recv_str = string_init((U8 *)buffer, request_size);
+  String recv_str = string_init(buffer, request_size);
 
   U64 arena_size = 2048;
   Arena string_arena = arena_init(arena_size);
@@ -174,6 +178,31 @@ void web_server(void) {
   // I guess this is never hit :(
   error_check(close(server_sockfd));
   printf("Closed server\n");
+}
+
+// Will delete this in the next commit, just want to store it somewhere
+void test_storage(void) {
+  TransactionNode t1 = {.data = transaction_init(string_literal("Food"), date_init(01, MONTH_JUN, 2026), 9.99)};
+  TransactionNode t2 = {.data = transaction_init(string_literal("Water"), date_init(28, MONTH_MAY, 2026), 11.99)};
+
+  LinkNode transactions;
+  linked_list_init(&transactions);
+  linked_list_push_back(&transactions, &t1.node);
+  linked_list_push_back(&transactions, &t2.node);
+
+  store_transactions(string_literal("test.dat"), &transactions);
+
+  Arena a = arena_init(512);
+  LinkNode *transactions_retrieved = retrieve_transactions(&a, string_literal("test.dat"));
+
+  for (LinkNode *p = transactions_retrieved->next; p != transactions_retrieved; p = p->next) {
+    Transaction t = link_node_get_container_node(p, TransactionNode, node)->data;
+
+    printf("%s: %s £%.2" F32f "\n", string_get_cstring(&a, t.desc),
+           date_get_cstring(&a, t.date, DATE_FORMAT_ALPHABETICAL_SHORT, DAY_OF_WEEK_FORMAT_SHORT), t.amount);
+  }
+
+  arena_free(&a);
 }
 
 int main(void) {
