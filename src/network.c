@@ -1,3 +1,5 @@
+#include "network.h"
+
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -11,8 +13,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "base/definitions.h"
-#include "base/string.h"
 #include "helpers.h"
 
 void send_data(int sockfd, const char *buffer, size_t buffer_size) {
@@ -50,14 +50,6 @@ ssize_t recv_data(int sockfd, char *buffer, size_t buffer_size) {
 }
 
 ssize_t recv_request(int sockfd, char *buffer, size_t buffer_size) {
-  ssize_t message_size = error_check_ssize_t(recv(sockfd, buffer, buffer_size, 0));
-  String message_as_string = string_init(buffer, message_size);
-
-  U64 newline_pos = string_find_first(message_as_string, string_literal("\n"));
-
-  if (newline_pos == U64NULL) {
-    return -1;
-  }
-
-  return newline_pos;
+  memset(buffer, 0, buffer_size);
+  return error_check_ssize_t(recv(sockfd, buffer, buffer_size, 0));
 }

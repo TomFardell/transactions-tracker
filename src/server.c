@@ -20,10 +20,7 @@
 #include "storage.h"
 #include "transaction.h"
 
-#define RECV_BUFFER_SIZE 256
-
-const String static_path = string_literal("static/");
-const String not_found_file = string_literal("error.html");
+#define RECV_BUFFER_SIZE 1024
 
 // Get whether a file can be accessed by a client
 bool can_access_file(const String file_path) {
@@ -83,32 +80,45 @@ void send_200(int sockfd, const char *file_path) {
   printf("Closed file '%s'\n", file_path);
 }
 
+void handle_post(String request_body) {
+  Arena post_arena = arena_init(request_body.len + 1);
+  printf("Received POST request with body '%s'\n", string_get_cstring(&post_arena, request_body));
+  arena_free(&post_arena);
+}
+
 // Given a socket file descriptor for an accepted incoming connection, receive and handle a single request
 void handle_client(int in_sockfd) {
   char buffer[RECV_BUFFER_SIZE];
 
-  ssize_t request_size = recv_request(in_sockfd, buffer, sizeof(buffer));
-  if (request_size == -1) {
-    printf("Ignoring empty, unterminated or too-long request\n");
+  ssize_t request_length = recv_request(in_sockfd, buffer, sizeof(buffer));
+  if (request_length == 0) {
+    printf("Ignoring empty request\n");
+    return;
+  }
+  if (request_length == sizeof(buffer)) {
+    printf("Ignoring request of length %zd (probably too large for buffer)\n", request_length);
     return;
   }
 
-  String recv_str = string_init(buffer, request_size);
+  Arena string_arena = arena_init(4 * RECV_BUFFER_SIZE);
+  String recv_str = string_init(buffer, request_length);
+  LinkNode *request_parts = string_split(&string_arena, recv_str, string_literal("\r\n\r\n"));
+  String request_header = linked_list_get_container_node_at_index(request_parts, 0, StringNode, node)->data;
+  String header_first_line =
+      string_init_substring(request_header, 0, string_find_first(request_header, string_literal("\r\n")));
 
-  U64 arena_size = 2048;
-  Arena string_arena = arena_init(arena_size);
-
-  LinkNode *request_words = string_split(&string_arena, recv_str, string_literal(" "));
-  if (linked_list_get_length(request_words) != 3) {
-    printf("Ignoring request containing %" U64f " words\n", linked_list_get_length(request_words));
+  LinkNode *header_words = string_split(&string_arena, header_first_line, string_literal(" "));
+  if (linked_list_get_length(header_words) != 3) {
+    printf("Ignoring request containing %" U64f " words\n", linked_list_get_length(header_words));
 
     arena_free(&string_arena);
     return;
   }
 
-  String request_type = linked_list_get_container_node_at_index(request_words, 0, StringNode, node)->data;
-  String request_arg = linked_list_get_container_node_at_index(request_words, 1, StringNode, node)->data;
-  if (!string_equals(request_type, string_literal("GET"))) {
+  String request_type = linked_list_get_container_node_at_index(header_words, 0, StringNode, node)->data;
+  String request_arg = linked_list_get_container_node_at_index(header_words, 1, StringNode, node)->data;
+  if (!string_equals(request_type, string_literal("GET")) &&
+      !string_equals(request_type, string_literal("POST"))) {
     printf("Ignoring unexpected request of type '%s'\n", string_get_cstring(&string_arena, request_type));
 
     arena_free(&string_arena);
@@ -121,15 +131,26 @@ void handle_client(int in_sockfd) {
     return;
   }
 
+  if (string_equals(request_type, string_literal("POST"))) {
+    if (linked_list_get_length(request_parts) <= 1) {
+      printf("Ignoring POST request with empty message body\n");
+
+      arena_free(&string_arena);
+      return;
+    }
+    String request_body = linked_list_get_container_node_at_index(request_parts, 1, StringNode, node)->data;
+    handle_post(request_body);
+  }
+
   String requested_file = string_init_substring(request_arg, 1, request_arg.len);
-  requested_file = string_append(&string_arena, static_path, requested_file);
-  printf("Client made %s request for '%s' (maps to '%s')\n", string_get_cstring(&string_arena, request_type),
-         string_get_cstring(&string_arena, request_arg), string_get_cstring(&string_arena, requested_file));
+  requested_file = string_append(&string_arena, static_dir, requested_file);
+  printf("Client made request for '%s' (maps to '%s')\n", string_get_cstring(&string_arena, request_arg),
+         string_get_cstring(&string_arena, requested_file));
 
   if (!can_access_file(requested_file)) {
     printf("Unable to access file '%s'\n", string_get_cstring(&string_arena, requested_file));
 
-    String not_found_path = string_append(&string_arena, static_path, not_found_file);
+    String not_found_path = string_append(&string_arena, static_dir, not_found_file);
     if (!can_access_file(not_found_path)) {
       abort("Unable to access Not Found file '%s'", string_get_cstring(&string_arena, not_found_path));
     }
@@ -178,31 +199,6 @@ void web_server(void) {
   // I guess this is never hit :(
   error_check(close(server_sockfd));
   printf("Closed server\n");
-}
-
-// Will delete this in the next commit, just want to store it somewhere
-void test_storage(void) {
-  TransactionNode t1 = {.data = transaction_init(string_literal("Food"), date_init(01, MONTH_JUN, 2026), 9.99)};
-  TransactionNode t2 = {.data = transaction_init(string_literal("Water"), date_init(28, MONTH_MAY, 2026), 11.99)};
-
-  LinkNode transactions;
-  linked_list_init(&transactions);
-  linked_list_push_back(&transactions, &t1.node);
-  linked_list_push_back(&transactions, &t2.node);
-
-  store_transactions(string_literal("test.dat"), &transactions);
-
-  Arena a = arena_init(512);
-  LinkNode *transactions_retrieved = retrieve_transactions(&a, string_literal("test.dat"));
-
-  for (LinkNode *p = transactions_retrieved->next; p != transactions_retrieved; p = p->next) {
-    Transaction t = link_node_get_container_node(p, TransactionNode, node)->data;
-
-    printf("%s: %s £%.2" F32f "\n", string_get_cstring(&a, t.desc),
-           date_get_cstring(&a, t.date, DATE_FORMAT_ALPHABETICAL_SHORT, DAY_OF_WEEK_FORMAT_SHORT), t.amount);
-  }
-
-  arena_free(&a);
 }
 
 int main(void) {
