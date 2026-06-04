@@ -104,8 +104,8 @@ void handle_client(int in_sockfd) {
   String recv_str = string_init(buffer, request_length);
   LinkNode *request_parts = string_split(&string_arena, recv_str, string_literal("\r\n\r\n"));
   String request_header = linked_list_get_container_node_at_index(request_parts, 0, StringNode, node)->data;
-  String header_first_line =
-      string_init_substring(request_header, 0, string_find_first(request_header, string_literal("\r\n")));
+  LinkNode *request_header_lines = string_split(&string_arena, request_header, string_literal("\r\n"));
+  String header_first_line = link_node_get_container_node(request_header_lines->next, StringNode, node)->data;
 
   LinkNode *header_words = string_split(&string_arena, header_first_line, string_literal(" "));
   if (linked_list_get_length(header_words) != 3) {

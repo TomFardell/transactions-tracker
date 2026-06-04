@@ -36,21 +36,31 @@ void send_request(const char *request) {
 }
 
 int main(int argc, char **argv) {
-  if (argc != 2) {
-    printf("Please call with a single argument, the request to send\n");
+  if (argc < 2 || 3 < argc) {
+    fprintf(stderr, "Call with either a request header or both a request header and body.\n");
     return EXIT_FAILURE;
   }
 
-  // Add a newline to the command line argument
-  size_t request_len = strlen(argv[1]);
-  char *terminated_request = malloc((request_len + 2) * sizeof(*terminated_request));
-  strcpy(terminated_request, argv[1]);
-  terminated_request[request_len] = '\n';
-  terminated_request[request_len + 1] = '\0';
+  size_t header_len = strlen(argv[1]);
+  size_t request_len = header_len + 3;  // One \r\n and a \0
+  if (argc == 3) {
+    request_len += 2 + strlen(argv[2]);  // Additional \r\n
+  }
+  char *formatted_request = malloc(request_len);
 
-  send_request(terminated_request);
+  strcpy(formatted_request, argv[1]);
+  formatted_request[header_len] = '\r';
+  formatted_request[header_len + 1] = '\n';
+  if (argc == 3) {
+    formatted_request[header_len + 2] = '\r';
+    formatted_request[header_len + 3] = '\n';
+    strcpy(formatted_request + header_len + 4, argv[2]);
+  }
+  formatted_request[request_len] = '\0';
 
-  free(terminated_request);
+  send_request(formatted_request);
+
+  free(formatted_request);
 
   return 0;
 }
