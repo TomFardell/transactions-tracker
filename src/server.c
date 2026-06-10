@@ -202,8 +202,19 @@ void web_server(void) {
   printf("Closed server\n");
 }
 
+void test_parsing(void) {
+  Arena a = arena_init(1024);
+
+  LinkNode *transactions = retrieve_transactions(&a, string_literal("test.dat"));
+  MappingInput mapping_input = {.transactions = transactions};
+  MappingLists mapping_lists = mapping_lists_init(&a, mapping_input);
+
+  parse_file_into(string_literal("static/index.html"), string_literal("static/parsed_index.html"), mapping_lists);
+  arena_free(&a);
+}
+
 int main(void) {
-  web_server();
+  test_parsing();
 
   return 0;
 }

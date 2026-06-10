@@ -37,31 +37,38 @@ typedef struct MemberMapping {
   DataType type;
 } MemberMapping;
 
-// Type of mapping held in a mapping node
-typedef enum MappingType {
-  MAPPING_TYPE_LIST,
-  MAPPING_TYPE_ITEM,
-  MAPPING_TYPE_MEMBER,
-} MappingType;
-
-// Node used in a linked list of mappings
-typedef struct MappingNode {
-  MappingType type;
-  union {
-    ListMapping list_mapping;
-    ItemMapping item_mapping;
-    MemberMapping member_mapping;
-  };
+// Node containing a list mapping
+typedef struct ListMappingNode {
+  ListMapping data;
   LinkNode node;
-} MappingNode;
+} ListMappingNode;
 
-// Initialise the mapping data required for the parser - a linked list of mappings allocated on the passed arena
-LinkNode *mapping_init(Arena *a, MappingInput mapping_input);
+// Node containing an item mapping
+typedef struct ItemMappingNode {
+  ItemMapping data;
+  LinkNode node;
+} ItemMappingNode;
+
+// Node containing a member mapping
+typedef struct MemberMappingNode {
+  MemberMapping data;
+  LinkNode node;
+} MemberMappingNode;
+
+// Storage of lists of each mapping type
+typedef struct MappingLists {
+  LinkNode *list_mappings;
+  LinkNode *item_mappings;
+  LinkNode *member_mappings;
+} MappingLists;
+
+// Initialise the mapping lists required by the parser, allocating them on the passed arena
+MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input);
 
 // Given a file to parse, parse it and store the result in the out file
-void parse_file_into(String file_path_in, String file_path_out, const LinkNode *mapping);
+void parse_file_into(String in_path, String out_path, MappingLists mapping_lists);
 // Parse the given string, storing the result on the given arena
-String parse_string(Arena *a, String data, const LinkNode *mapping);
+String parse_string(Arena *a, String data, MappingLists mapping_lists);
 
 #endif  // PARSER_H
 

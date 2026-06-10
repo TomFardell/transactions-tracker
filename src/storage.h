@@ -18,7 +18,7 @@ String retrieve_string(Arena *a, FILE *file);
 // Read a transaction from a given file, storing the description string data on the given arena
 Transaction retrieve_transaction(Arena *a, FILE *file);
 // Retrieve transactions from a specified file, storing them in a linked list on the given arena
-LinkNode *retrieve_transactions(Arena *a, const String file_name);
+LinkNode *retrieve_transactions(Arena *a, String file_name);
 
 #endif  // STORAGE_H
 

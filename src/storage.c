@@ -57,8 +57,8 @@ Transaction retrieve_transaction(Arena *a, FILE *file) {
   return result;
 }
 
-LinkNode *retrieve_transactions(Arena *a, const String file_name) {
-  Arena file_path_arena = arena_init(32);
+LinkNode *retrieve_transactions(Arena *a, String file_name) {
+  Arena file_path_arena = arena_init(64);
   String file_path = string_append(&file_path_arena, data_dir, file_name);
   FILE *file = error_check_ptr(fopen(string_get_cstring(&file_path_arena, file_path), "r"));
   arena_free(&file_path_arena);

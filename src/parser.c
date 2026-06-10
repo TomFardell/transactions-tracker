@@ -11,43 +11,44 @@
 #include "sys/stat.h"
 #include "transaction.h"
 
-LinkNode *mapping_init(Arena *a, MappingInput mapping_input) {
-  LinkNode *result = arena_alloc_single(a, LinkNode);
-  linked_list_init(result);
+MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input) {
+  MappingLists result = {arena_alloc_single(a, LinkNode), arena_alloc_single(a, LinkNode),
+                         arena_alloc_single(a, LinkNode)};
+  linked_list_init(result.list_mappings);
+  linked_list_init(result.item_mappings);
+  linked_list_init(result.member_mappings);
 
-  MappingNode *mapping_node;
+  ListMappingNode *list_mapping_node;
 
-  mapping_node = arena_alloc_single(a, MappingNode);
-  mapping_node->type = MAPPING_TYPE_LIST;
-  mapping_node->list_mapping.name = string_literal("transactions");
-  mapping_node->list_mapping.items = mapping_input.transactions;
-  linked_list_push_back(result, &mapping_node->node);
+  list_mapping_node = arena_alloc_single(a, ListMappingNode);
+  list_mapping_node->data.name = string_literal("transactions");
+  list_mapping_node->data.items = mapping_input.transactions;
+  linked_list_push_back(result.list_mappings, &list_mapping_node->node);
 
-  mapping_node = arena_alloc_single(a, MappingNode);
-  mapping_node->type = MAPPING_TYPE_MEMBER;
-  mapping_node->member_mapping.name = string_literal("desc");
-  mapping_node->member_mapping.offset = offset_of(Transaction, desc);
-  mapping_node->member_mapping.type = DATA_TYPE_TEXT;
-  linked_list_push_back(result, &mapping_node->node);
+  MemberMappingNode *member_mapping_node;
 
-  mapping_node = arena_alloc_single(a, MappingNode);
-  mapping_node->type = MAPPING_TYPE_MEMBER;
-  mapping_node->member_mapping.name = string_literal("date");
-  mapping_node->member_mapping.offset = offset_of(Transaction, date);
-  mapping_node->member_mapping.type = DATA_TYPE_DATE;
-  linked_list_push_back(result, &mapping_node->node);
+  member_mapping_node = arena_alloc_single(a, MemberMappingNode);
+  member_mapping_node->data.name = string_literal("desc");
+  member_mapping_node->data.offset = offset_of(Transaction, desc);
+  member_mapping_node->data.type = DATA_TYPE_TEXT;
+  linked_list_push_back(result.member_mappings, &member_mapping_node->node);
 
-  mapping_node = arena_alloc_single(a, MappingNode);
-  mapping_node->type = MAPPING_TYPE_MEMBER;
-  mapping_node->member_mapping.name = string_literal("amount");
-  mapping_node->member_mapping.offset = offset_of(Transaction, amount);
-  mapping_node->member_mapping.type = DATA_TYPE_CURRENCY;
-  linked_list_push_back(result, &mapping_node->node);
+  member_mapping_node = arena_alloc_single(a, MemberMappingNode);
+  member_mapping_node->data.name = string_literal("date");
+  member_mapping_node->data.offset = offset_of(Transaction, date);
+  member_mapping_node->data.type = DATA_TYPE_DATE;
+  linked_list_push_back(result.member_mappings, &member_mapping_node->node);
+
+  member_mapping_node = arena_alloc_single(a, MemberMappingNode);
+  member_mapping_node->data.name = string_literal("amount");
+  member_mapping_node->data.offset = offset_of(Transaction, amount);
+  member_mapping_node->data.type = DATA_TYPE_CURRENCY;
+  linked_list_push_back(result.member_mappings, &member_mapping_node->node);
 
   return result;
 }
 
-void parse_file_into(String in_path, String out_path, const LinkNode *mapping) {
+void parse_file_into(String in_path, String out_path, MappingLists mapping_lists) {
   Arena parse_arena = arena_init(8192);
 
   I32 infd = open(string_get_cstring(&parse_arena, in_path), O_RDONLY);
@@ -58,14 +59,16 @@ void parse_file_into(String in_path, String out_path, const LinkNode *mapping) {
   error_check_ssize_t(read(infd, in_data, file_size));
   error_check(close(infd));
 
-  String out_data = parse_string(&parse_arena, string_init(in_data, file_size), mapping);
+  String out_data = parse_string(&parse_arena, string_init(in_data, file_size), mapping_lists);
 
   FILE *out_file = error_check_ptr(fopen(string_get_cstring(&parse_arena, out_path), "w"));
   error_check_fread_fwrite(fwrite(out_data.str, 1, out_data.len, out_file), out_file);
   error_check(fclose(out_file));
+
+  arena_free(&parse_arena);
 }
 
-String parse_string(Arena *a, String data, const LinkNode *mapping) {
+String parse_string(Arena *a, String data, MappingLists mapping_lists) {
   LinkNode *opening_tags = string_find_all(a, data, string_literal("{{"));
   LinkNode *closing_tags = string_find_all(a, data, string_literal("}}"));
 
@@ -95,10 +98,23 @@ String parse_string(Arena *a, String data, const LinkNode *mapping) {
       String argument = linked_list_get_container_node_at_index(tag_words, 1, StringNode, node)->data;
 
       if (string_equals(command, string_literal("#each"))) {
-        string_builder_add_string(a, &sb, string_literal("<each "));
-        string_builder_add_string(a, &sb, argument);
-        string_builder_add_string(a, &sb, string_literal(" command>"));
+        string_builder_add_string(a, &sb, string_literal("<each command over"));
+        for (LinkNode *p = mapping_lists.list_mappings->next; p != mapping_lists.list_mappings; p = p->next) {
+          ListMapping this_list_mapping = link_node_get_container_node(p, ListMappingNode, node)->data;
+          if (!string_equals(this_list_mapping.name, argument)) {
+            if (p->next == mapping_lists.list_mappings) {
+              abort("No mapping found for #each argument %s", string_get_cstring(a, argument));
+            }
+            continue;
+          }
 
+          for (LinkNode *q = this_list_mapping.items->next; q != this_list_mapping.items; q = q->next) {
+            string_builder_add_string(
+                a, &sb, string_format(a, " %p", &link_node_get_container_node(q, TransactionNode, node)->data));
+          }
+        }
+
+        string_builder_add_string(a, &sb, string_literal(">"));
       } else if (string_equals(command, string_literal("#sum"))) {
         string_builder_add_string(a, &sb, string_literal("<sum "));
         string_builder_add_string(a, &sb, argument);
