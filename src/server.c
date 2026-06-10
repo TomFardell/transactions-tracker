@@ -17,6 +17,7 @@
 #include "constants.h"
 #include "helpers.h"
 #include "network.h"
+#include "parser.h"
 #include "storage.h"
 #include "transaction.h"
 
