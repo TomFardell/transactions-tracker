@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-g3 -Wall -std=c17
+CFLAGS=-g3 -Wall -std=gnu17
 LDFLAGS=
 
 SRC=src
@@ -18,7 +18,7 @@ send_request: $(SEND_REQUEST) $(SHARED)
 	$(CC) $(CFLAGS) $(EXTRAFLAGS) -o $@ $^ $(LDFLAGS)
 
 %.o: %.c
-	$(CC) $(CLFAGS) $(EXTRAFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(EXTRAFLAGS) -c -o $@ $<
 
 clean:
 	rm -f server send_request *.o $(SRC)/*.o $(BASE)/*.o

@@ -11,30 +11,36 @@ typedef struct MappingInput {
 } MappingInput;
 
 // How to display the mapping
-typedef enum DataType {
-  DATA_TYPE_CURRENCY,
-  DATA_TYPE_DATE,
-  DATA_TYPE_TEXT,
-} DataType;
+typedef enum DisplayType {
+  DISPLAY_TYPE_NONE,
+  DISPLAY_TYPE_CURRENCY,
+  DISPLAY_TYPE_DATE,
+  DISPLAY_TYPE_TEXT,
+} DisplayType;
 
 // Mapping of the start of a linked list
 typedef struct ListMapping {
-  String name;
-  LinkNode *items;
+  LinkNode *items;                // Pointer to the list's link node
+  String name;                    // Name of the list
+  String item_struct_name;        // Struct name of each item (if needed to find members)
+  DisplayType item_display_type;  // Display type of each item
+  U64 item_node_offset;           // The offset of node in each item
 } ListMapping;
 
 // Mapping of a single item
 typedef struct ItemMapping {
-  String name;
-  void *item;
-  DataType type;
+  void *item;                // Pointer to the item
+  String name;               // Name of the item
+  String struct_name;        // Struct name of the item (if needed to find members)
+  DisplayType display_type;  // Display type of the item
 } ItemMapping;
 
-// Mapping of a displayable member of some struct
+// Mapping of a member of some struct
 typedef struct MemberMapping {
-  String name;
-  U64 offset;
-  DataType type;
+  U64 offset;                // Offset of the member within the struct
+  String name;               // Name of the member
+  String struct_name;        // Name of the struct containing the member
+  DisplayType display_type;  // Display type of the member
 } MemberMapping;
 
 // Node containing a list mapping
