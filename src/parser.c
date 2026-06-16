@@ -140,6 +140,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, I
             find_closing_tag(data, string_literal("each"), open_node, opening_tag_positions);
         String data_between_tags = string_init_substring(data, close_pos + 2, closer_tag_opening_pos);
 
+        // Search for a matching list mapping
         for (LinkNode *p = mapping_lists.list_mappings->next; p != mapping_lists.list_mappings; p = p->next) {
           ListMapping this_list_mapping = link_node_get_container_node(p, ListMappingNode, node)->data;
 
@@ -150,6 +151,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, I
             continue;
           }
 
+          // Loop through the actual items
           for (LinkNode *item_node = this_list_mapping.items->next; item_node != this_list_mapping.items;
                item_node = item_node->next) {
             // Yeah not gonna lie this code is complete garbage
@@ -178,9 +180,87 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, I
         /*------*/
         /* #sum */
         /*-------------------------------------------------------------------------------------------------------*/
-        string_builder_add_string(a, &sb, string_literal("<sum "));
-        string_builder_add_string(a, &sb, argument);
-        string_builder_add_string(a, &sb, string_literal(" command>"));
+        LinkNode *members = string_split(a, argument, string_literal("."));
+        String list_name = link_node_get_container_node(members->next, StringNode, node)->data;
+
+        for (LinkNode *p = mapping_lists.list_mappings->next; p != mapping_lists.list_mappings; p = p->next) {
+          ListMapping this_list_mapping = link_node_get_container_node(p, ListMappingNode, node)->data;
+
+          if (!string_equals(this_list_mapping.name, list_name)) {
+            if (p->next == mapping_lists.list_mappings) {
+              abort("No mapping found for #sum argument '%s'", string_get_cstring(a, list_name));
+            }
+            continue;
+          }
+
+          U64 items_member_offset = 0;
+          DisplayType items_display_type = this_list_mapping.item_display_type;
+          String items_struct_name = this_list_mapping.item_struct_name;
+
+          // Loop to get the location and display type of the desired member of the first item
+          for (LinkNode *member_node = members->next->next; member_node != members;
+               member_node = member_node->next) {
+            String member_name = link_node_get_container_node(member_node, StringNode, node)->data;
+            // Check through all the member mappings for one matching this name
+            for (LinkNode *mapping_node = mapping_lists.member_mappings->next;
+                 mapping_node != mapping_lists.member_mappings; mapping_node = mapping_node->next) {
+              MemberMapping this_member_mapping =
+                  link_node_get_container_node(mapping_node, MemberMappingNode, node)->data;
+
+              if (string_equals(member_name, this_member_mapping.name) &&
+                  string_equals(items_struct_name, this_member_mapping.struct_name)) {
+                items_member_offset += this_member_mapping.offset;
+                items_display_type = this_member_mapping.display_type;
+                items_struct_name =
+                    string_concat(a, 3, items_struct_name, string_literal("."), this_member_mapping.struct_name);
+                break;
+              }
+
+              if (mapping_node->next == mapping_lists.member_mappings) {
+                abort("No mapping found for member '%s' of '%s'", string_get_cstring(a, member_name),
+                      string_get_cstring(a, items_struct_name));
+              }
+            }
+          }
+
+          union {
+            F32 currency;
+          } result = {0};
+
+          // Now loop through each item and sum the result
+          for (LinkNode *item_node = this_list_mapping.items->next; item_node != this_list_mapping.items;
+               item_node = item_node->next) {
+            // The list mapping contains a pointer to the linked list of the actual item values. Since we don't
+            // know what type these are, we need to use the item node offset stored in the list mapping to get the
+            // container node's data. We then add the member's offset to get a pointer to the member we want. If
+            // I'm being completely honest, this code is rubbish
+            void *item = (U8 *)item_node - this_list_mapping.item_node_offset + items_member_offset;
+
+            switch (items_display_type) {
+              case (DISPLAY_TYPE_CURRENCY): {
+                result.currency += *((F32 *)item);
+                break;
+              }
+              default: {
+                abort("'%s' has unsummable display type '%d'", string_get_cstring(a, items_struct_name),
+                      (int)items_display_type);
+              }
+            }
+          }
+
+          String item_output;
+          switch (items_display_type) {
+            case (DISPLAY_TYPE_CURRENCY): {
+              item_output = string_format(a, "%.02" F32f, result.currency);
+              break;
+            }
+            default: {
+              item_output = (String){0};
+            }
+          }
+
+          string_builder_add_string(a, &sb, item_output);
+        }
         /*-------------------------------------------------------------------------------------------------------*/
       } else {
         abort("Unrecognised command '%s'", string_get_cstring(a, command));
@@ -221,7 +301,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, I
       DisplayType item_display_type;
       String item_struct_name;
 
-      // Get the location of the item, and its display type
+      // Loop to get the location of the item, and its display type
       for (LinkNode *member_node = members->next; member_node != members; member_node = member_node->next) {
         String member_name = link_node_get_container_node(member_node, StringNode, node)->data;
 
@@ -284,7 +364,6 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, I
           abort("Got item '%s' with no display type", item_name);
         }
         case DISPLAY_TYPE_CURRENCY: {
-          // TODO: Probably need also store the data type of the item, as what if we had an F64 here?
           item_output = string_format(a, "%.02" F32f, *((F32 *)item));
           break;
         }

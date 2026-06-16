@@ -24,7 +24,7 @@ typedef struct ListMapping {
   String name;                    // Name of the list
   String item_struct_name;        // Struct name of each item (if needed to find members)
   DisplayType item_display_type;  // Display type of each item
-  U64 item_node_offset;           // The offset of node in each item
+  U64 item_node_offset;           // The offset of the node within each item in the linked list
 } ListMapping;
 
 // Mapping of a single item
