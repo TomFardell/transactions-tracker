@@ -55,7 +55,7 @@ MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input) {
   return result;
 }
 
-void parse_file_into(String in_path, String out_path, MappingLists mapping_lists) {
+void parse_file_into(String in_path, String out_path, const MappingLists mapping_lists) {
   Arena parse_arena = arena_init(8192);
 
   I32 infd = open(string_get_cstring(&parse_arena, in_path), O_RDONLY);
@@ -100,13 +100,18 @@ static U64 find_closing_tag(String data, String tag_name, LinkNode *current_open
 }
 
 // Parse a given string but with info on which item mapping the keyword "this" refers to
-static String _parse_string(Arena *a, String data, MappingLists mapping_lists, ItemMapping this_mapping) {
+static String _parse_string(Arena *a, String data, MappingLists mapping_lists, const ItemMapping this_mapping) {
   LinkNode *opening_tag_positions = string_find_all(a, data, string_literal("{{"));
   LinkNode *closing_tag_positions = string_find_all(a, data, string_literal("}}"));
 
   if (linked_list_get_length(opening_tag_positions) != linked_list_get_length(closing_tag_positions)) {
     abort("Different number of '{{' (%" U64f ") and '}}' (% " U64f ")",
           linked_list_get_length(opening_tag_positions), linked_list_get_length(closing_tag_positions));
+  }
+
+  // If there is nothing to parse, skip copying the whole string
+  if (linked_list_get_length(opening_tag_positions) == 0) {
+    return data;
   }
 
   LinkNode sb;
@@ -255,7 +260,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, I
               break;
             }
             default: {
-              item_output = (String){0};
+              item_output = string_literal("");
             }
           }
 
@@ -389,6 +394,6 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, I
   return string_builder_get_string(a, &sb);
 }
 
-String parse_string(Arena *a, String data, MappingLists mapping_lists) {
+String parse_string(Arena *a, String data, const MappingLists mapping_lists) {
   return _parse_string(a, data, mapping_lists, (ItemMapping){0});
 }

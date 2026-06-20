@@ -88,7 +88,7 @@ void handle_post(String request_body) {
 }
 
 // Given a socket file descriptor for an accepted incoming connection, receive and handle a single request
-void handle_client(int in_sockfd) {
+void handle_client(int in_sockfd, const MappingLists mapping_lists) {
   char buffer[RECV_BUFFER_SIZE];
 
   ssize_t request_length = recv_request(in_sockfd, buffer, sizeof(buffer));
@@ -144,7 +144,21 @@ void handle_client(int in_sockfd) {
   }
 
   String requested_file = string_init_substring(request_arg, 1, request_arg.len);
-  requested_file = string_append(&string_arena, static_dir, requested_file);
+  String requested_file_type = string_literal("");
+  U64 requested_file_dot_pos = string_find_first(requested_file, string_literal("."));
+  if (requested_file_dot_pos != U64NULL) {
+    requested_file_type = string_init_substring(requested_file, requested_file_dot_pos + 1, requested_file.len);
+  }
+
+  if (string_equals(requested_file_type, string_literal("html"))) {
+    String static_path = string_append(&string_arena, static_dir, requested_file);
+    String parsed_path = string_append(&string_arena, parsed_dir, requested_file);
+    parse_file_into(static_path, parsed_path, mapping_lists);
+    requested_file = parsed_path;
+  } else {
+    requested_file = string_append(&string_arena, static_dir, requested_file);
+  }
+
   printf("Client made request for '%s' (maps to '%s')\n", string_get_cstring(&string_arena, request_arg),
          string_get_cstring(&string_arena, requested_file));
 
@@ -167,6 +181,12 @@ void handle_client(int in_sockfd) {
 }
 
 void web_server(void) {
+  // Worryingly this arena getting filled up will crash the program. Uhhhh will fix later
+  Arena transactions_arena = arena_init(16384);
+  LinkNode *transactions = retrieve_transactions(&transactions_arena, string_literal("test.dat"));
+  MappingInput mapping_input = {.transactions = transactions};
+  const MappingLists mapping_lists = mapping_lists_init(&transactions_arena, mapping_input);
+
   int server_sockfd = server_init(PORT);
   U32 backlog_size = 10;
   error_check(listen(server_sockfd, backlog_size));
@@ -190,7 +210,7 @@ void web_server(void) {
       printf("Accepted unknown address\n");
     }
 
-    handle_client(in_sockfd);
+    handle_client(in_sockfd, mapping_lists);
 
     error_check(close(in_sockfd));
     printf("Closed connection\n");
@@ -198,23 +218,13 @@ void web_server(void) {
   }
 
   // I guess this is never hit :(
+  arena_free(&transactions_arena);
   error_check(close(server_sockfd));
   printf("Closed server\n");
 }
 
-void test_parsing(void) {
-  Arena a = arena_init(1024);
-
-  LinkNode *transactions = retrieve_transactions(&a, string_literal("test.dat"));
-  MappingInput mapping_input = {.transactions = transactions};
-  MappingLists mapping_lists = mapping_lists_init(&a, mapping_input);
-
-  parse_file_into(string_literal("static/index.html"), string_literal("static/parsed_index.html"), mapping_lists);
-  arena_free(&a);
-}
-
 int main(void) {
-  test_parsing();
+  web_server();
 
   return 0;
 }

@@ -72,9 +72,9 @@ typedef struct MappingLists {
 MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input);
 
 // Given a file to parse, parse it and store the result in the out file
-void parse_file_into(String in_path, String out_path, MappingLists mapping_lists);
+void parse_file_into(String in_path, String out_path, const MappingLists mapping_lists);
 // Parse the given string, storing the result on the given arena
-String parse_string(Arena *a, String data, MappingLists mapping_lists);
+String parse_string(Arena *a, String data, const MappingLists mapping_lists);
 
 #endif  // PARSER_H
 
