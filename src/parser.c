@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "base/compound_types.h"
 #include "base/definitions.h"
 #include "base/memory.h"
 #include "base/string.h"
@@ -58,7 +59,7 @@ MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input) {
 void parse_file_into(String in_path, String out_path, const MappingLists mapping_lists) {
   Arena parse_arena = arena_init(8192);
 
-  I32 infd = open(string_get_cstring(&parse_arena, in_path), O_RDONLY);
+  int infd = error_check_int(open(string_get_cstring(&parse_arena, in_path), O_RDONLY));
   struct stat file_stat;
   error_check(fstat(infd, &file_stat));
   U64 file_size = file_stat.st_size;
@@ -151,7 +152,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
 
           if (!string_equals(this_list_mapping.name, argument)) {
             if (p->next == mapping_lists.list_mappings) {
-              abort("No mapping found for #each argument '%s'", string_get_cstring(a, argument));
+              abort("No mapping found for #each argument '%" Stringf "'", stringf_args(argument));
             }
             continue;
           }
@@ -193,7 +194,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
 
           if (!string_equals(this_list_mapping.name, list_name)) {
             if (p->next == mapping_lists.list_mappings) {
-              abort("No mapping found for #sum argument '%s'", string_get_cstring(a, list_name));
+              abort("No mapping found for #sum argument '%" Stringf "'", stringf_args(list_name));
             }
             continue;
           }
@@ -222,8 +223,8 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
               }
 
               if (mapping_node->next == mapping_lists.member_mappings) {
-                abort("No mapping found for member '%s' of '%s'", string_get_cstring(a, member_name),
-                      string_get_cstring(a, items_struct_name));
+                abort("No mapping found for member '%" Stringf "' of '%" Stringf "'", stringf_args(member_name),
+                      stringf_args(items_struct_name));
               }
             }
           }
@@ -247,7 +248,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
                 break;
               }
               default: {
-                abort("'%s' has unsummable display type '%d'", string_get_cstring(a, items_struct_name),
+                abort("'%" Stringf "' has unsummable display type '%d'", stringf_args(items_struct_name),
                       (int)items_display_type);
               }
             }
@@ -268,7 +269,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
         }
         /*-------------------------------------------------------------------------------------------------------*/
       } else {
-        abort("Unrecognised command '%s'", string_get_cstring(a, command));
+        abort("Unrecognised command '%" Stringf "'", stringf_args(command));
       }
       /*---------------------------------------------------------------------------------------------------------*/
     } else if (tag_contents.str[0] == '/') {
@@ -288,7 +289,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
 
         /*-------------------------------------------------------------------------------------------------------*/
       } else {
-        abort("Unrecognised command termination '%s'", string_get_cstring(a, command));
+        abort("Unrecognised command termination '% " Stringf "'", stringf_args(command));
       }
       /*---------------------------------------------------------------------------------------------------------*/
     } else {
@@ -334,7 +335,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
               }
 
               if (mapping_node->next == mapping_lists.item_mappings) {
-                abort("No mapping found for item '%s'", string_get_cstring(a, member_name));
+                abort("No mapping found for item '% " Stringf "'", stringf_args(member_name));
               }
             }
           }
@@ -355,8 +356,8 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
             }
 
             if (mapping_node->next == mapping_lists.member_mappings) {
-              abort("No mapping found for member '%s' of '%s'", string_get_cstring(a, member_name),
-                    string_get_cstring(a, item_struct_name));
+              abort("No mapping found for member '%" Stringf "' of '%" Stringf "'", stringf_args(member_name),
+                    stringf_args(item_struct_name));
             }
           }
         }

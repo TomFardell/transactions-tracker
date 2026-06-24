@@ -4,3 +4,5 @@ data
 server
 send_request
 parsed
+.clangd
+compile_commands.json

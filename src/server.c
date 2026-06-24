@@ -11,7 +11,6 @@
 #include <unistd.h>
 
 #include "base/data.h"
-#include "base/date.h"
 #include "base/definitions.h"
 #include "base/string.h"
 #include "constants.h"
@@ -19,11 +18,10 @@
 #include "network.h"
 #include "parser.h"
 #include "storage.h"
-#include "transaction.h"
 
 #define RECV_BUFFER_SIZE 1024
 
-// Get whether a file can be accessed by a client
+// Get whether a file can be accessed by the client
 bool can_access_file(const String file_path) {
   // Don't allow requests that traverse out the directory
   if (string_contains(file_path, string_literal("../"))) {
@@ -81,103 +79,109 @@ void send_200(int sockfd, const char *file_path) {
   printf("Closed file '%s'\n", file_path);
 }
 
-void handle_post(String request_body) {
-  Arena post_arena = arena_init(request_body.len + 1);
-  printf("Received POST request with body '%s'\n", string_get_cstring(&post_arena, request_body));
-  arena_free(&post_arena);
-}
-
-// Given a socket file descriptor for an accepted incoming connection, receive and handle a single request
-void handle_client(int in_sockfd, const MappingLists mapping_lists) {
-  char buffer[RECV_BUFFER_SIZE];
-
-  ssize_t request_length = recv_request(in_sockfd, buffer, sizeof(buffer));
-  if (request_length == 0) {
-    printf("Ignoring empty request\n");
-    return;
-  }
-  if (request_length == sizeof(buffer)) {
-    printf("Ignoring request of length %zd (probably too large for buffer)\n", request_length);
-    return;
-  }
-
-  Arena string_arena = arena_init(4 * RECV_BUFFER_SIZE);
-  String recv_str = string_init(buffer, request_length);
-  LinkNode *request_parts = string_split(&string_arena, recv_str, string_literal("\r\n\r\n"));
-  String request_header = linked_list_get_container_node_at_index(request_parts, 0, StringNode, node)->data;
-  LinkNode *request_header_lines = string_split(&string_arena, request_header, string_literal("\r\n"));
-  String header_first_line = link_node_get_container_node(request_header_lines->next, StringNode, node)->data;
-
-  LinkNode *header_words = string_split(&string_arena, header_first_line, string_literal(" "));
-  if (linked_list_get_length(header_words) != 3) {
-    printf("Ignoring request containing %" U64f " words\n", linked_list_get_length(header_words));
-
-    arena_free(&string_arena);
-    return;
-  }
-
-  String request_type = linked_list_get_container_node_at_index(header_words, 0, StringNode, node)->data;
-  String request_arg = linked_list_get_container_node_at_index(header_words, 1, StringNode, node)->data;
-  if (!string_equals(request_type, string_literal("GET")) &&
-      !string_equals(request_type, string_literal("POST"))) {
-    printf("Ignoring unexpected request of type '%s'\n", string_get_cstring(&string_arena, request_type));
-
-    arena_free(&string_arena);
-    return;
-  }
+void handle_get(Arena *string_arena, String request_arg, MappingLists mapping_lists, int sockfd) {
   if (request_arg.str[0] != '/') {
-    printf("Ignoring request with unexpected arg '%s'\n", string_get_cstring(&string_arena, request_arg));
+    printf("Ignoring request with unexpected arg '%" Stringf "'\n", stringf_args(request_arg));
 
-    arena_free(&string_arena);
     return;
   }
 
-  if (string_equals(request_type, string_literal("POST"))) {
-    if (linked_list_get_length(request_parts) <= 1) {
-      printf("Ignoring POST request with empty message body\n");
+  String requested_file = string_init_substring(request_arg, 1, request_arg.len);  // Remove the '/'
 
-      arena_free(&string_arena);
-      return;
-    }
-    String request_body = linked_list_get_container_node_at_index(request_parts, 1, StringNode, node)->data;
-    handle_post(request_body);
-  }
-
-  String requested_file = string_init_substring(request_arg, 1, request_arg.len);
+  // Figure out the filetype (everything after the first '.') of the requested file
   String requested_file_type = string_literal("");
   U64 requested_file_dot_pos = string_find_first(requested_file, string_literal("."));
   if (requested_file_dot_pos != U64NULL) {
     requested_file_type = string_init_substring(requested_file, requested_file_dot_pos + 1, requested_file.len);
   }
 
-  if (string_equals(requested_file_type, string_literal("html"))) {
-    String static_path = string_append(&string_arena, static_dir, requested_file);
-    String parsed_path = string_append(&string_arena, parsed_dir, requested_file);
-    parse_file_into(static_path, parsed_path, mapping_lists);
-    requested_file = parsed_path;
-  } else {
-    requested_file = string_append(&string_arena, static_dir, requested_file);
+  String static_path = string_append(string_arena, static_dir, requested_file);
+  // Don't parse non-html files
+  String parsed_path = string_equals(requested_file_type, string_literal("html"))
+                           ? string_append(string_arena, parsed_dir, requested_file)
+                           : static_path;
+
+  printf("Client made request for '%" Stringf "' (maps to '%" Stringf "')\n", stringf_args(request_arg),
+         stringf_args(parsed_path));
+
+  // If the client requests a file they shouldn't, send a 404 (and do this before any parsing)
+  if (!can_access_file(static_path)) {
+    printf("Unable to access file '%" Stringf "'\n", stringf_args(static_path));
+
+    String not_found_path = string_append(string_arena, static_dir, not_found_file);
+    if (!can_access_file(not_found_path)) {
+      abort("Unable to access Not Found file '% " Stringf "'", stringf_args(not_found_path));
+    }
+    send_404(sockfd, string_get_cstring(string_arena, not_found_path));
+
+    return;
   }
 
-  printf("Client made request for '%s' (maps to '%s')\n", string_get_cstring(&string_arena, request_arg),
-         string_get_cstring(&string_arena, requested_file));
+  if (string_equals(requested_file_type, string_literal("html"))) {
+    parse_file_into(static_path, parsed_path, mapping_lists);
+    printf("Parsed file '%" Stringf "' into '%" Stringf "')\n", stringf_args(static_path),
+           stringf_args(parsed_path));
+  }
 
-  if (!can_access_file(requested_file)) {
-    printf("Unable to access file '%s'\n", string_get_cstring(&string_arena, requested_file));
+  send_200(sockfd, string_get_cstring(string_arena, parsed_path));
+}
 
-    String not_found_path = string_append(&string_arena, static_dir, not_found_file);
-    if (!can_access_file(not_found_path)) {
-      abort("Unable to access Not Found file '%s'", string_get_cstring(&string_arena, not_found_path));
-    }
-    send_404(in_sockfd, string_get_cstring(&string_arena, not_found_path));
+void handle_post(const LinkNode *request_header_body) {
+  if (linked_list_get_length(request_header_body) <= 1) {
+    printf("Ignoring POST request with no message body\n");
+    return;
+  }
+
+  String request_body = linked_list_get_container_node_at_index(request_header_body, 1, StringNode, node)->data;
+  printf("Received POST request with body '%" Stringf "'\n", stringf_args(request_body));
+}
+
+// Given a socket file descriptor for an accepted incoming connection, receive and handle a single request
+void handle_client(int in_sockfd, const MappingLists mapping_lists) {
+  char buffer[RECV_BUFFER_SIZE];
+
+  ssize_t bytes_received = recv_request(in_sockfd, buffer, sizeof(buffer));
+  if (bytes_received == 0) {
+    printf("Ignoring empty request\n");
+    return;
+  }
+  if (bytes_received == RECV_BUFFER_SIZE) {
+    printf("Ignoring request of length %zd (probably too large for buffer)\n", bytes_received);
+    return;
+  }
+
+  Arena string_arena = arena_init(4 * RECV_BUFFER_SIZE);
+
+  LinkNode *request_header_body =
+      string_split(&string_arena, string_init(buffer, bytes_received), string_literal("\r\n\r\n"));
+
+  String request_header = linked_list_get_container_node_at_index(request_header_body, 0, StringNode, node)->data;
+  LinkNode *request_header_lines = string_split(&string_arena, request_header, string_literal("\r\n"));
+
+  String header_first_line =
+      linked_list_get_container_node_at_index(request_header_lines, 0, StringNode, node)->data;
+  LinkNode *header_first_line_words = string_split(&string_arena, header_first_line, string_literal(" "));
+
+  if (linked_list_get_length(header_first_line_words) != 3) {
+    printf("Ignoring request containing %" U64f " words\n", linked_list_get_length(header_first_line_words));
 
     arena_free(&string_arena);
     return;
   }
 
-  send_200(in_sockfd, string_get_cstring(&string_arena, requested_file));
+  String request_type =
+      linked_list_get_container_node_at_index(header_first_line_words, 0, StringNode, node)->data;
+  String request_arg = linked_list_get_container_node_at_index(header_first_line_words, 1, StringNode, node)->data;
+
+  if (string_equals(request_type, string_literal("GET"))) {
+    handle_get(&string_arena, request_arg, mapping_lists, in_sockfd);
+  } else if (string_equals(request_type, string_literal("POST"))) {
+    handle_post(request_header_body);
+  } else {
+    printf("Ignoring unexpected request of type '%" Stringf "'\n", stringf_args(request_type));
+  }
+
   arena_free(&string_arena);
-  return;
 }
 
 void web_server(void) {
