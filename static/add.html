@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<link rel="stylesheet" href="styles.css">
+		<title>Add Transaction</title>
+	</head>
+
+	<body>
+		<h1 class="main-title">Add Transaction</h1>
+		<p class="info"><b>Total</b>: <!--{{#sum transactions.amount}}--></p>
+
+		<h2 class="sub-title">Add</h2>
+		<form method="post">
+			<!--{{#if (num_add_transaction_inputs < 10)}}-->
+			<button type="submit" name="instruction" value="increment-num_add_transaction_inputs">+</button>
+			<!--{{/if}}-->
+			<!--{{#if (num_add_transaction_inputs > 1)}}-->
+			<button type="submit" name="instruction" value="decrement-num_add_transaction_inputs">-</button>
+			<!--{{/if}}-->
+		</form>
+		<br>
+		<form method="post">
+			<!--{{#each }}-->
+			<input type="date" name=".date">
+			<input type="text" name=".desc">
+			<input type="text" name=".amount">
+			<br>
+			<!--{{#if (num_add_transaction_inputs > 1)}}-->
+			<button type="submit" name="instruction" value="add_to-transactions">add</button>
+		</form>
+	</body>
+</html>

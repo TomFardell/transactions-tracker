@@ -177,6 +177,7 @@ void handle_client(int in_sockfd, const MappingLists mapping_lists) {
     handle_get(&string_arena, request_arg, mapping_lists, in_sockfd);
   } else if (string_equals(request_type, string_literal("POST"))) {
     handle_post(request_header_body);
+    handle_get(&string_arena, request_arg, mapping_lists, in_sockfd);  // Also send the requested file
   } else {
     printf("Ignoring unexpected request of type '%" Stringf "'\n", stringf_args(request_type));
   }
