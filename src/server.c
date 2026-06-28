@@ -43,10 +43,12 @@ int server_init(const char *service) {
   error_check(getaddrinfo(NULL, service, &hints, &info));
 
   int sockfd = error_check_int(socket(info->ai_family, info->ai_socktype, info->ai_protocol));
-  error_check(bind(sockfd, info->ai_addr, info->ai_addrlen));
 
-  const int yes = 0;
+  // Allow restarting the server without needing to wait for the kernel to free that socket
+  const int yes = 1;
   error_check(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)));
+
+  error_check(bind(sockfd, info->ai_addr, info->ai_addrlen));
 
   freeaddrinfo(info);
 

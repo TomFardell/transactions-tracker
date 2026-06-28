@@ -10,7 +10,7 @@
 
 	<body>
 		<h1 class="main-title">Transactions Tracker</h1>
-		<p class="info"><b>Total</b>: {{#sum transactions.amount}}</p>
+		<p class="info"><b>Total</b>: <!--{{#sum transactions.amount}}--></p>
 
 		<h2 class="sub-title">History</h2>
 		<table class="table">
@@ -19,13 +19,13 @@
 				<th>Date</th>
 				<th>Amount</th>
 			</tr>
-			{{#each transactions}}
+			<!--{{#each transactions}}-->
 			<tr>
-				<td>{{this.desc}}</td>
-				<td>{{this.date}}</td>
-				<td>{{this.amount}}</td>
+				<td><!--{{this.desc}}--></td>
+				<td><!--{{this.date}}--></td>
+				<td><!--{{this.amount}}--></td>
 			</tr>
-			{{/each}}
+			<!--{{/each}}-->
 		</table>
 	</body>
 </html>

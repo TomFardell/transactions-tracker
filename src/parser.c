@@ -81,12 +81,12 @@ static U64 find_closing_tag(String data, String tag_name, LinkNode *current_open
   I32 tag_depth = 1;
   for (LinkNode *open_node = current_open_node->next; open_node != opening_tags; open_node = open_node->next) {
     U64 open_pos = link_node_get_container_node(open_node, U64Node, node)->data;
-    char command_type = data.str[open_pos + 2];
+    char command_type = data.str[open_pos + parse_tag_opener.len];
 
     if (command_type != '/' && command_type != '#') {
       continue;
     }
-    if (!string_equals(string_init(data.str + open_pos + 3, tag_name.len), tag_name)) {
+    if (!string_equals(string_init(data.str + open_pos + parse_tag_opener.len + 1, tag_name.len), tag_name)) {
       continue;
     }
 
@@ -102,15 +102,16 @@ static U64 find_closing_tag(String data, String tag_name, LinkNode *current_open
 
 // Parse a given string but with info on which item mapping the keyword "this" refers to
 static String _parse_string(Arena *a, String data, MappingLists mapping_lists, const ItemMapping this_mapping) {
-  LinkNode *opening_tag_positions = string_find_all(a, data, string_literal("{{"));
-  LinkNode *closing_tag_positions = string_find_all(a, data, string_literal("}}"));
+  LinkNode *opening_tag_positions = string_find_all(a, data, parse_tag_opener);
+  LinkNode *closing_tag_positions = string_find_all(a, data, parse_tag_closer);
 
   if (linked_list_get_length(opening_tag_positions) != linked_list_get_length(closing_tag_positions)) {
-    abort("Different number of '{{' (%" U64f ") and '}}' (% " U64f ")",
-          linked_list_get_length(opening_tag_positions), linked_list_get_length(closing_tag_positions));
+    abort("Different number of '%" Stringf "'s (%" U64f ") and '%" Stringf "'s (% " U64f ")",
+          stringf_args(parse_tag_opener), linked_list_get_length(opening_tag_positions),
+          stringf_args(parse_tag_closer), linked_list_get_length(closing_tag_positions));
   }
 
-  // If there is nothing to parse, skip copying the whole string
+  // If there is nothing to parse, don't do anything
   if (linked_list_get_length(opening_tag_positions) == 0) {
     return data;
   }
@@ -125,7 +126,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
     U64 close_pos = link_node_get_container_node(close_node, U64Node, node)->data;
 
     string_builder_add_string(a, &sb, string_init_substring(data, cursor_pos, open_pos));
-    String tag_contents = string_init_substring(data, open_pos + 2, close_pos);
+    String tag_contents = string_init_substring(data, open_pos + parse_tag_opener.len, close_pos);
 
     LinkNode *tag_words = string_split(a, tag_contents, string_literal(" "));
     if (tag_contents.str[0] == '#') {
@@ -142,9 +143,10 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
         /*-------*/
         /* #each */
         /*-------------------------------------------------------------------------------------------------------*/
-        U64 closer_tag_opening_pos =
+        U64 closing_tag_opener_pos =
             find_closing_tag(data, string_literal("each"), open_node, opening_tag_positions);
-        String data_between_tags = string_init_substring(data, close_pos + 2, closer_tag_opening_pos);
+        String data_between_tags =
+            string_init_substring(data, close_pos + parse_tag_closer.len, closing_tag_opener_pos);
 
         // Search for a matching list mapping
         for (LinkNode *p = mapping_lists.list_mappings->next; p != mapping_lists.list_mappings; p = p->next) {
@@ -160,7 +162,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
           // Loop through the actual items
           for (LinkNode *item_node = this_list_mapping.items->next; item_node != this_list_mapping.items;
                item_node = item_node->next) {
-            // Yeah not gonna lie this code is complete garbage
+            // Yeah not gonna lie, this code is complete garbage
             ItemMapping this_item_mapping = {
                 .item = (U8 *)item_node - this_list_mapping.item_node_offset,  // Manually get container node
                 .name = string_literal("this"),                                // Not really needed
@@ -174,10 +176,11 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
         }
 
         // Make a new recursive call on everything after the #each block
-        U64 closer_tag_end_pos =
-            closer_tag_opening_pos +
-            string_find_first(string_init_substring(data, closer_tag_opening_pos, data.len), string_literal("}}"));
-        String data_after_each = string_init_substring(data, closer_tag_end_pos + 2, data.len);
+        U64 closing_tag_closer_pos =
+            closing_tag_opener_pos +
+            string_find_first(string_init_substring(data, closing_tag_opener_pos, data.len), parse_tag_closer);
+        String data_after_each =
+            string_init_substring(data, closing_tag_closer_pos + parse_tag_closer.len, data.len);
         string_builder_add_string(a, &sb, _parse_string(a, data_after_each, mapping_lists, this_mapping));
 
         return string_builder_get_string(a, &sb);  // We are now done, so return early
@@ -387,7 +390,7 @@ static String _parse_string(Arena *a, String data, MappingLists mapping_lists, c
       /*---------------------------------------------------------------------------------------------------------*/
     }
 
-    cursor_pos = close_pos + 2;
+    cursor_pos = close_pos + parse_tag_closer.len;
   }
 
   string_builder_add_string(a, &sb, string_init_substring(data, cursor_pos, data.len));
