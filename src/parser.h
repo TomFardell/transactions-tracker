@@ -5,9 +5,10 @@
 #include "base/memory.h"
 #include "base/string.h"
 
-// Struct to be filled with pointers for the actual values that are being mapped in
+// Struct to be filled with pointers for the underlying data that is being mapped into
 typedef struct MappingInput {
   LinkNode *transactions;
+  U32 *num_add_transaction_inputs;
 } MappingInput;
 
 // How to display the mapping
@@ -15,15 +16,18 @@ typedef enum DisplayType {
   DISPLAY_TYPE_NONE,
   DISPLAY_TYPE_CURRENCY,
   DISPLAY_TYPE_DATE,
+  DISPLAY_TYPE_NUMBER,
   DISPLAY_TYPE_TEXT,
 } DisplayType;
 
+// How the data is stored in the program
 typedef enum InternalType {
   INTERNAL_TYPE_NULL,
   INTERNAL_TYPE_DATE,
   INTERNAL_TYPE_F32,
   INTERNAL_TYPE_STRING,
   INTERNAL_TYPE_TRANSACTION,
+  INTERNAL_TYPE_U32,
 } InternalType;
 
 // Mapping of the start of a linked list

@@ -14,21 +14,21 @@
 
 		<h2 class="sub-title">Add</h2>
 		<form method="post">
-			<!--{{#if (num_add_transaction_inputs < 10)}}-->
+			<!--{{#if num_add_transaction_inputs < 10}}-->
 			<button type="submit" name="instruction" value="increment-num_add_transaction_inputs">+</button>
 			<!--{{/if}}-->
-			<!--{{#if (num_add_transaction_inputs > 1)}}-->
+			<!--{{#if num_add_transaction_inputs > 1}}-->
 			<button type="submit" name="instruction" value="decrement-num_add_transaction_inputs">-</button>
 			<!--{{/if}}-->
 		</form>
 		<br>
 		<form method="post">
-			<!--{{#each }}-->
+			<!--[[#each num_add_transaction_inputs]]-->
 			<input type="date" name=".date">
 			<input type="text" name=".desc">
 			<input type="text" name=".amount">
+			<!--[[/each]]-->
 			<br>
-			<!--{{#if (num_add_transaction_inputs > 1)}}-->
 			<button type="submit" name="instruction" value="add_to-transactions">add</button>
 		</form>
 	</body>
