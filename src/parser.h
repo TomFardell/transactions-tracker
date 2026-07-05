@@ -18,29 +18,39 @@ typedef enum DisplayType {
   DISPLAY_TYPE_TEXT,
 } DisplayType;
 
+typedef enum InternalType {
+  INTERNAL_TYPE_NULL,
+  INTERNAL_TYPE_DATE,
+  INTERNAL_TYPE_F32,
+  INTERNAL_TYPE_STRING,
+  INTERNAL_TYPE_TRANSACTION,
+} InternalType;
+
 // Mapping of the start of a linked list
 typedef struct ListMapping {
-  LinkNode *items;                // Pointer to the list's link node
-  String name;                    // Name of the list
-  String item_struct_name;        // Struct name of each item (if needed to find members)
-  DisplayType item_display_type;  // Display type of each item
-  U64 item_node_offset;           // The offset of the node within each item in the linked list
+  LinkNode *items;                  // Pointer to the list's link node
+  String name;                      // Name of the list
+  String item_struct_name;          // Struct name of each item (if needed to find members)
+  DisplayType item_display_type;    // Display type of each item
+  InternalType item_internal_type;  // Internal type of each item
 } ListMapping;
 
 // Mapping of a single item
 typedef struct ItemMapping {
-  void *item;                // Pointer to the item
-  String name;               // Name of the item
-  String struct_name;        // Struct name of the item (if needed to find members)
-  DisplayType display_type;  // Display type of the item
+  void *item;                  // Pointer to the item
+  String name;                 // Name of the item
+  String struct_name;          // Struct name of the item (if needed to find members)
+  DisplayType display_type;    // Display type of the item
+  InternalType internal_type;  // Internal type of the item
 } ItemMapping;
 
 // Mapping of a member of some struct
 typedef struct MemberMapping {
-  U64 offset;                // Offset of the member within the struct
-  String name;               // Name of the member
-  String struct_name;        // Name of the struct containing the member
-  DisplayType display_type;  // Display type of the member
+  U64 offset;                  // Offset of the member within the struct
+  String name;                 // Name of the member
+  String struct_name;          // Name of the struct containing the member
+  DisplayType display_type;    // Display type of the member
+  InternalType internal_type;  // Internal type of the member
 } MemberMapping;
 
 // Node containing a list mapping
@@ -71,10 +81,18 @@ typedef struct MappingLists {
 // Initialise the mapping lists required by the parser, allocating them on the passed arena
 MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input);
 
-// Given a file to parse, parse it and store the result in the out file
-void parse_file_into(String in_path, String out_path, const MappingLists mapping_lists);
+// Locate a list mapping of a given name in the passed mapping lists. Aborts if not found
+ListMapping mapping_lists_locate_list_mapping(MappingLists mapping_lists, String list_mapping_name);
+// Locate an item mapping of a given name in the passed mapping lists. Aborts if not found
+ItemMapping mapping_lists_locate_item_mapping(MappingLists mapping_lists, String item_mapping_name);
+// Locate a matching struct mapping in the passed mapping lists. Aborts if not found
+MemberMapping mapping_lists_locate_member_mapping(MappingLists mapping_lists, String member_mapping_struct_name,
+                                                  String member_mapping_name);
+
 // Parse the given string, storing the result on the given arena
 String parse_string(Arena *a, String data, const MappingLists mapping_lists);
+// Given a file to parse, parse it and store the result in the out file
+void parse_file_into(String in_path, String out_path, const MappingLists mapping_lists);
 
 #endif  // PARSER_H
 

@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include "base/compound_types.h"
+#include "base/date.h"
 #include "base/definitions.h"
 #include "base/memory.h"
 #include "base/string.h"
@@ -27,7 +28,7 @@ MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input) {
   list_mapping_node->data.name = string_literal("transactions");
   list_mapping_node->data.item_struct_name = string_literal("Transaction");
   list_mapping_node->data.item_display_type = DISPLAY_TYPE_NONE;
-  list_mapping_node->data.item_node_offset = offset_of(TransactionNode, node);
+  list_mapping_node->data.item_internal_type = INTERNAL_TYPE_TRANSACTION;
   linked_list_push_back(result.list_mappings, &list_mapping_node->node);
 
   MemberMappingNode *member_mapping_node;
@@ -37,6 +38,7 @@ MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input) {
   member_mapping_node->data.name = string_literal("desc");
   member_mapping_node->data.struct_name = string_literal("Transaction");
   member_mapping_node->data.display_type = DISPLAY_TYPE_TEXT;
+  member_mapping_node->data.internal_type = INTERNAL_TYPE_STRING;
   linked_list_push_back(result.member_mappings, &member_mapping_node->node);
 
   member_mapping_node = arena_alloc_single(a, MemberMappingNode);
@@ -44,6 +46,7 @@ MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input) {
   member_mapping_node->data.name = string_literal("date");
   member_mapping_node->data.struct_name = string_literal("Transaction");
   member_mapping_node->data.display_type = DISPLAY_TYPE_DATE;
+  member_mapping_node->data.internal_type = INTERNAL_TYPE_DATE;
   linked_list_push_back(result.member_mappings, &member_mapping_node->node);
 
   member_mapping_node = arena_alloc_single(a, MemberMappingNode);
@@ -51,9 +54,396 @@ MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input) {
   member_mapping_node->data.name = string_literal("amount");
   member_mapping_node->data.struct_name = string_literal("Transaction");
   member_mapping_node->data.display_type = DISPLAY_TYPE_CURRENCY;
+  member_mapping_node->data.internal_type = INTERNAL_TYPE_F32;
   linked_list_push_back(result.member_mappings, &member_mapping_node->node);
 
   return result;
+}
+
+ListMapping mapping_lists_locate_list_mapping(MappingLists mapping_lists, String list_mapping_name) {
+  for (LinkNode *p = mapping_lists.list_mappings->next; p != mapping_lists.list_mappings; p = p->next) {
+    ListMapping this_list_mapping = link_node_get_container_node(p, ListMappingNode, node)->data;
+
+    if (string_equals(this_list_mapping.name, list_mapping_name)) {
+      return this_list_mapping;
+    }
+  }
+  abort("Unable to find list mapping of name '%" Stringf "'", stringf_args(list_mapping_name));
+}
+
+ItemMapping mapping_lists_locate_item_mapping(MappingLists mapping_lists, String item_mapping_name) {
+  for (LinkNode *p = mapping_lists.item_mappings->next; p != mapping_lists.item_mappings; p = p->next) {
+    ItemMapping this_item_mapping = link_node_get_container_node(p, ItemMappingNode, node)->data;
+
+    if (string_equals(this_item_mapping.name, item_mapping_name)) {
+      return this_item_mapping;
+    }
+  }
+  abort("Unable to find item mapping of name '%" Stringf "'", stringf_args(item_mapping_name));
+}
+
+MemberMapping mapping_lists_locate_member_mapping(MappingLists mapping_lists, String member_mapping_struct_name,
+                                                  String member_mapping_name) {
+  for (LinkNode *mapping_node = mapping_lists.member_mappings->next; mapping_node != mapping_lists.member_mappings;
+       mapping_node = mapping_node->next) {
+    MemberMapping this_member_mapping = link_node_get_container_node(mapping_node, MemberMappingNode, node)->data;
+
+    if (string_equals(this_member_mapping.name, member_mapping_name) &&
+        string_equals(this_member_mapping.struct_name, member_mapping_struct_name)) {
+      return this_member_mapping;
+    }
+  }
+  abort("Unable to find member mapping of name '%" Stringf "' and type '%" Stringf "'",
+        stringf_args(member_mapping_name), stringf_args(member_mapping_struct_name));
+}
+
+typedef struct MemberInfo {
+  U64 offset;
+  DisplayType display_type;
+  InternalType internal_type;
+} MemberInfo;
+
+// Given a member path (i.e. {"BaseType", "member1", "member2"}), calculate its offset (from base type) and its
+// display type
+static MemberInfo mapping_lists_get_member_info_from_path(MappingLists mapping_lists, LinkNode *member_path) {
+  U64 member_depth = linked_list_get_length(member_path);
+  if (member_depth <= 1) {
+    abort("Cannot get member from path of length '%" U64f "'", member_depth);
+  }
+
+  Arena a = arena_init(512);
+
+  U64 member_offset = 0;
+  DisplayType member_display_type;
+  InternalType member_internal_type;
+  String member_path_so_far = linked_list_get_container_node_at_index(member_path, 0, StringNode, node)->data;
+
+  for (LinkNode *p = linked_list_get_node_at_index(member_path, 1); p != member_path; p = p->next) {
+    String member_name = link_node_get_container_node(p, StringNode, node)->data;
+
+    MemberMapping member_mapping =
+        mapping_lists_locate_member_mapping(mapping_lists, member_path_so_far, member_name);
+
+    member_offset += member_mapping.offset;
+    member_display_type = member_mapping.display_type;
+    member_internal_type = member_mapping.internal_type;
+    member_path_so_far = string_concat(&a, 3, member_path_so_far, string_literal("."), member_mapping.struct_name);
+  }
+
+  arena_free(&a);
+  return (MemberInfo){member_offset, member_display_type, member_internal_type};
+}
+
+// Find the start position of the closing tag of the passed command. Specifically handles nested commands of the
+// same type
+static U64 find_closing_tag_pos(String data, String tag_name) {
+  I32 tag_depth = 0;
+  U64 cursor_pos = 0;
+  String remaining_data = data;
+
+  while (true) {
+    U64 next_tag_opener_pos = string_find_first(remaining_data, parse_tag_opener);
+    U64 next_tag_closer_pos = string_find_first(remaining_data, parse_tag_closer);
+    if (next_tag_opener_pos == U64NULL) {
+      return U64NULL;
+    }
+
+    char command_type = data.str[cursor_pos + next_tag_opener_pos + parse_tag_opener.len];
+    String tag_contents = string_init_substring(data, cursor_pos + next_tag_opener_pos + parse_tag_opener.len + 1,
+                                                cursor_pos + next_tag_closer_pos);
+    U64 first_space_pos = string_find_first(tag_contents, string_literal(" "));
+    String command_name =
+        (first_space_pos == U64NULL) ? tag_contents : string_init_substring(tag_contents, 0, first_space_pos);
+
+    if ((command_type == '/' || command_type == '#') && string_equals(command_name, tag_name)) {
+      tag_depth += (command_type == '#') - (command_type == '/');
+
+      if (tag_depth == 0) {
+        return cursor_pos + next_tag_opener_pos;
+      }
+    }
+
+    cursor_pos += next_tag_closer_pos + parse_tag_closer.len + 1;
+    remaining_data = string_init_substring(data, cursor_pos, data.len);
+  }
+}
+
+// Get a pointer to the data in the container node of a link node where the container node is associated with a
+// given internal type
+static void *internal_type_get_data_from_item_node(const LinkNode *item_node, InternalType internal_type) {
+  switch (internal_type) {
+    case INTERNAL_TYPE_NULL: {
+      abort("Cannot process list with null internal types");
+    }
+    case INTERNAL_TYPE_DATE: {
+      abort("Date nodes currently not implemented");
+    }
+    case INTERNAL_TYPE_F32: {
+      return &link_node_get_container_node(item_node, F32Node, node)->data;
+    }
+    case INTERNAL_TYPE_STRING: {
+      return &link_node_get_container_node(item_node, StringNode, node)->data;
+    }
+    case INTERNAL_TYPE_TRANSACTION: {
+      return &link_node_get_container_node(item_node, TransactionNode, node)->data;
+    }
+    default: {
+      abort("Unrecognised internal type '%d'", (int)internal_type);
+    }
+  };
+}
+
+// Given a pointer to some memory and internal and display types, get the string that should be displayed
+static String types_get_string_output(Arena *a, const void *item, InternalType internal_type,
+                                      DisplayType display_type) {
+  switch (display_type) {
+    case DISPLAY_TYPE_CURRENCY: {
+      switch (internal_type) {
+        case (INTERNAL_TYPE_F32): {
+          return string_format(a, "%.02" F32f, *((F32 *)item));
+        }
+
+        default: {
+          abort("Cannot display item of internal type '%d' as currency", (int)internal_type);
+        }
+      }
+    }
+
+    case DISPLAY_TYPE_DATE: {
+      switch (internal_type) {
+        case (INTERNAL_TYPE_DATE): {
+          return date_get_string(a, *((Date *)item), date_format, day_of_week_format);
+        }
+
+        default: {
+          abort("Cannot display item of internal type '%d' as date", (int)internal_type);
+        }
+      }
+    }
+
+    case DISPLAY_TYPE_TEXT: {
+      switch (internal_type) {
+        case (INTERNAL_TYPE_STRING): {
+          return *((String *)item);
+        }
+
+        default: {
+          abort("Cannot display item of internal type '%d' as text", (int)internal_type);
+        }
+      }
+    }
+
+    default: {
+      abort("Cannot display item with display type '%d'", (int)display_type);
+    }
+  }
+}
+
+// Recursively called function that parses the next tag in its input, constructing the result in the passed
+// string builder. Also takes info on what the keyword 'this' refers to
+static void _parse_string(Arena *a, String data, MappingLists mapping_lists, ItemMapping this_mapping,
+                          LinkNode *sb) {
+  U64 next_tag_opener_pos = string_find_first(data, parse_tag_opener);
+  U64 next_tag_closer_pos = string_find_first(data, parse_tag_closer);
+
+  if (next_tag_opener_pos == U64NULL && next_tag_closer_pos == U64NULL) {
+    string_builder_add_string(a, sb, data);
+    return;
+  }
+  if (next_tag_opener_pos == U64NULL || next_tag_closer_pos == U64NULL) {
+    abort("Different number of openers ('%" Stringf "') and closers ('%" Stringf "')",
+          stringf_args(parse_tag_opener), stringf_args(parse_tag_closer));
+  }
+
+  U64 cursor_pos = 0;
+
+  // Add everything up to the found tag
+  string_builder_add_string(a, sb, string_init_substring(data, cursor_pos, next_tag_opener_pos));
+
+  // Get the stuff inside the tag and split it into words
+  String tag_contents =
+      string_init_substring(data, next_tag_opener_pos + parse_tag_opener.len, next_tag_closer_pos);
+  LinkNode *tag_words = string_split(a, tag_contents, string_literal(" "));
+
+  if (tag_contents.str[0] == '#') {
+    /*------------*/
+    /* # commands */
+    /*---------------------------------------------------------------------------------------------------------*/
+    String command = linked_list_get_container_node_at_index(tag_words, 0, StringNode, node)->data;
+
+    if (string_equals(command, string_literal("#each"))) {
+      /*-------*/
+      /* #each */
+      /*-------------------------------------------------------------------------------------------------------*/
+      if (linked_list_get_length(tag_words) != 2) {
+        abort("Got %" U64f " arguments in '#each' command tag (expected 2)", linked_list_get_length(tag_words));
+      }
+      String argument = linked_list_get_container_node_at_index(tag_words, 1, StringNode, node)->data;
+
+      U64 closing_tag_opener_pos = find_closing_tag_pos(data, string_literal("each"));
+      if (closing_tag_opener_pos == U64NULL) {
+        abort("No closing '/each' tag for '#each' command");
+      }
+
+      String data_between_tags =
+          string_init_substring(data, next_tag_closer_pos + parse_tag_closer.len, closing_tag_opener_pos);
+
+      // Search for a matching list mapping
+      ListMapping list_mapping = mapping_lists_locate_list_mapping(mapping_lists, argument);
+
+      // Loop through the actual items
+      for (LinkNode *item_node = list_mapping.items->next; item_node != list_mapping.items;
+           item_node = item_node->next) {
+        ItemMapping this_item_mapping = {
+            .item = internal_type_get_data_from_item_node(item_node, list_mapping.item_internal_type),
+            .name = string_literal("this"),  // Not really needed
+            .struct_name = list_mapping.item_struct_name,
+            .display_type = list_mapping.item_display_type,
+            .internal_type = list_mapping.item_internal_type,
+        };
+
+        _parse_string(a, data_between_tags, mapping_lists, this_item_mapping, sb);
+      }
+
+      // Place the cursor after the closing /each tag
+      cursor_pos =
+          closing_tag_opener_pos +
+          string_find_first(string_init_substring(data, closing_tag_opener_pos, data.len), parse_tag_closer) +
+          parse_tag_closer.len;
+      /*-------------------------------------------------------------------------------------------------------*/
+    } else if (string_equals(command, string_literal("#sum"))) {
+      /*------*/
+      /* #sum */
+      /*-------------------------------------------------------------------------------------------------------*/
+      if (linked_list_get_length(tag_words) != 2) {
+        abort("Got %" U64f " arguments in '#sum' command tag (expected 2)", linked_list_get_length(tag_words));
+      }
+      String argument = linked_list_get_container_node_at_index(tag_words, 1, StringNode, node)->data;
+
+      LinkNode *member_path = string_split(a, argument, string_literal("."));
+      String list_name = linked_list_get_container_node_at_index(member_path, 0, StringNode, node)->data;
+
+      // Search for a matching list mapping
+      ListMapping list_mapping = mapping_lists_locate_list_mapping(mapping_lists, list_name);
+
+      // Replace the list name with its struct name and get the offset and display type of the member
+      StringNode *base_type_name_node = arena_alloc_single(a, StringNode);
+      base_type_name_node->data = list_mapping.item_struct_name;
+      linked_list_remove_at_index(member_path, 0);
+      linked_list_push_front(member_path, &base_type_name_node->node);
+
+      MemberInfo member_info = mapping_lists_get_member_info_from_path(mapping_lists, member_path);
+
+      union {
+        F32 currency_f32;
+      } result = {0};
+
+      // Now loop through each item and sum the result
+      for (LinkNode *item_node = list_mapping.items->next; item_node != list_mapping.items;
+           item_node = item_node->next) {
+        void *item = (U8 *)internal_type_get_data_from_item_node(item_node, list_mapping.item_internal_type) +
+                     member_info.offset;
+
+        switch (member_info.display_type) {
+          case (DISPLAY_TYPE_CURRENCY): {
+            switch (member_info.internal_type) {
+              case INTERNAL_TYPE_F32: {
+                result.currency_f32 += *((F32 *)item);
+                break;
+              }
+              default: {
+                abort("Unable to treat internal type '%d' as a currency for '%" Stringf "'",
+                      (int)list_mapping.item_internal_type, stringf_args(argument));
+              }
+            }
+            break;
+          }
+
+          default: {
+            abort("'%" Stringf "' has unsummable display type '%d'", stringf_args(argument),
+                  (int)member_info.display_type);
+          }
+        }
+      }
+
+      String item_output =
+          types_get_string_output(a, &result, member_info.internal_type, member_info.display_type);
+      string_builder_add_string(a, sb, item_output);
+
+      cursor_pos = next_tag_closer_pos + parse_tag_closer.len;
+      /*-------------------------------------------------------------------------------------------------------*/
+    } else {
+      abort("Unrecognised command '%" Stringf "'", stringf_args(command));
+    }
+    /*---------------------------------------------------------------------------------------------------------*/
+  } else if (tag_contents.str[0] == '/') {
+    /*------------*/
+    /* / commands */
+    /*---------------------------------------------------------------------------------------------------------*/
+    if (linked_list_get_length(tag_words) != 1) {
+      abort("Got %" U64f " arguments in end command tag (expected 1)", linked_list_get_length(tag_words));
+    }
+    String command = linked_list_get_container_node_at_index(tag_words, 0, StringNode, node)->data;
+
+    if (string_equals(command, string_literal("/each"))) {
+      /*-------*/
+      /* /each */
+      /*-------------------------------------------------------------------------------------------------------*/
+      // Do nothing but move the cursor for now
+
+      cursor_pos = next_tag_closer_pos + parse_tag_closer.len;
+      /*-------------------------------------------------------------------------------------------------------*/
+    } else {
+      abort("Unrecognised command termination '% " Stringf "'", stringf_args(command));
+    }
+    /*---------------------------------------------------------------------------------------------------------*/
+  } else {
+    /*-------*/
+    /* items */
+    /*---------------------------------------------------------------------------------------------------------*/
+    if (linked_list_get_length(tag_words) != 1) {
+      abort("Got %" U64f " arguments in item tag (expected 1)", linked_list_get_length(tag_words));
+    }
+
+    String item_string = linked_list_get_container_node_at_index(tag_words, 0, StringNode, node)->data;
+    LinkNode *member_path = string_split(a, item_string, string_literal("."));
+    String base_item_name = linked_list_get_container_node_at_index(member_path, 0, StringNode, node)->data;
+
+    ItemMapping item_mapping;
+    if (string_equals(base_item_name, string_literal("this"))) {
+      item_mapping = this_mapping;
+    } else {
+      item_mapping = mapping_lists_locate_item_mapping(mapping_lists, item_string);
+    }
+
+    // Replace the item in the member path with its struct name
+    StringNode *base_type_name_node = arena_alloc_single(a, StringNode);
+    base_type_name_node->data = item_mapping.struct_name;
+    linked_list_remove_at_index(member_path, 0);
+    linked_list_push_front(member_path, &base_type_name_node->node);
+
+    MemberInfo member_info = mapping_lists_get_member_info_from_path(mapping_lists, member_path);
+
+    void *item = (U8 *)item_mapping.item + member_info.offset;
+
+    String item_output = types_get_string_output(a, item, member_info.internal_type, member_info.display_type);
+    string_builder_add_string(a, sb, item_output);
+
+    cursor_pos = next_tag_closer_pos + parse_tag_closer.len;
+    /*---------------------------------------------------------------------------------------------------------*/
+  }
+
+  // Call again with the remainder of the data
+  _parse_string(a, string_init_substring(data, cursor_pos, data.len), mapping_lists, this_mapping, sb);
+}
+
+String parse_string(Arena *a, String data, const MappingLists mapping_lists) {
+  LinkNode sb;
+  linked_list_init(&sb);
+
+  _parse_string(a, data, mapping_lists, (ItemMapping){0}, &sb);
+
+  return string_builder_get_string(a, &sb);
 }
 
 void parse_file_into(String in_path, String out_path, const MappingLists mapping_lists) {
@@ -74,330 +464,4 @@ void parse_file_into(String in_path, String out_path, const MappingLists mapping
   error_check(fclose(out_file));
 
   arena_free(&parse_arena);
-}
-
-// Find the start position of the closing tag of the passed command. Can handle nested commands
-static U64 find_closing_tag(String data, String tag_name, LinkNode *current_open_node, LinkNode *opening_tags) {
-  I32 tag_depth = 1;
-  for (LinkNode *open_node = current_open_node->next; open_node != opening_tags; open_node = open_node->next) {
-    U64 open_pos = link_node_get_container_node(open_node, U64Node, node)->data;
-    char command_type = data.str[open_pos + parse_tag_opener.len];
-
-    if (command_type != '/' && command_type != '#') {
-      continue;
-    }
-    if (!string_equals(string_init(data.str + open_pos + parse_tag_opener.len + 1, tag_name.len), tag_name)) {
-      continue;
-    }
-
-    tag_depth += (command_type == '#') - (command_type == '/');
-
-    if (tag_depth == 0) {
-      return open_pos;
-    }
-  }
-
-  return U64NULL;
-}
-
-// Parse a given string but with info on which item mapping the keyword "this" refers to
-static String _parse_string(Arena *a, String data, MappingLists mapping_lists, const ItemMapping this_mapping) {
-  LinkNode *opening_tag_positions = string_find_all(a, data, parse_tag_opener);
-  LinkNode *closing_tag_positions = string_find_all(a, data, parse_tag_closer);
-
-  if (linked_list_get_length(opening_tag_positions) != linked_list_get_length(closing_tag_positions)) {
-    abort("Different number of '%" Stringf "'s (%" U64f ") and '%" Stringf "'s (% " U64f ")",
-          stringf_args(parse_tag_opener), linked_list_get_length(opening_tag_positions),
-          stringf_args(parse_tag_closer), linked_list_get_length(closing_tag_positions));
-  }
-
-  // If there is nothing to parse, don't do anything
-  if (linked_list_get_length(opening_tag_positions) == 0) {
-    return data;
-  }
-
-  LinkNode sb;
-  linked_list_init(&sb);
-  U64 cursor_pos = 0;
-
-  for (LinkNode *open_node = opening_tag_positions->next, *close_node = closing_tag_positions->next;
-       open_node != opening_tag_positions; open_node = open_node->next, close_node = close_node->next) {
-    U64 open_pos = link_node_get_container_node(open_node, U64Node, node)->data;
-    U64 close_pos = link_node_get_container_node(close_node, U64Node, node)->data;
-
-    string_builder_add_string(a, &sb, string_init_substring(data, cursor_pos, open_pos));
-    String tag_contents = string_init_substring(data, open_pos + parse_tag_opener.len, close_pos);
-
-    LinkNode *tag_words = string_split(a, tag_contents, string_literal(" "));
-    if (tag_contents.str[0] == '#') {
-      /*------------*/
-      /* # commands */
-      /*---------------------------------------------------------------------------------------------------------*/
-      if (linked_list_get_length(tag_words) != 2) {
-        abort("Got %" U64f " arguments in command tag (expected 2)", linked_list_get_length(tag_words));
-      }
-      String command = linked_list_get_container_node_at_index(tag_words, 0, StringNode, node)->data;
-      String argument = linked_list_get_container_node_at_index(tag_words, 1, StringNode, node)->data;
-
-      if (string_equals(command, string_literal("#each"))) {
-        /*-------*/
-        /* #each */
-        /*-------------------------------------------------------------------------------------------------------*/
-        U64 closing_tag_opener_pos =
-            find_closing_tag(data, string_literal("each"), open_node, opening_tag_positions);
-        String data_between_tags =
-            string_init_substring(data, close_pos + parse_tag_closer.len, closing_tag_opener_pos);
-
-        // Search for a matching list mapping
-        for (LinkNode *p = mapping_lists.list_mappings->next; p != mapping_lists.list_mappings; p = p->next) {
-          ListMapping this_list_mapping = link_node_get_container_node(p, ListMappingNode, node)->data;
-
-          if (!string_equals(this_list_mapping.name, argument)) {
-            if (p->next == mapping_lists.list_mappings) {
-              abort("No mapping found for #each argument '%" Stringf "'", stringf_args(argument));
-            }
-            continue;
-          }
-
-          // Loop through the actual items
-          for (LinkNode *item_node = this_list_mapping.items->next; item_node != this_list_mapping.items;
-               item_node = item_node->next) {
-            // Yeah not gonna lie, this code is complete garbage
-            ItemMapping this_item_mapping = {
-                .item = (U8 *)item_node - this_list_mapping.item_node_offset,  // Manually get container node
-                .name = string_literal("this"),                                // Not really needed
-                .struct_name = this_list_mapping.item_struct_name,             // Need this if getting members
-                .display_type = this_list_mapping.item_display_type};          // Need this if displaying the items
-
-            String parsed_result = _parse_string(a, data_between_tags, mapping_lists, this_item_mapping);
-
-            string_builder_add_string(a, &sb, parsed_result);
-          }
-        }
-
-        // Make a new recursive call on everything after the #each block
-        U64 closing_tag_closer_pos =
-            closing_tag_opener_pos +
-            string_find_first(string_init_substring(data, closing_tag_opener_pos, data.len), parse_tag_closer);
-        String data_after_each =
-            string_init_substring(data, closing_tag_closer_pos + parse_tag_closer.len, data.len);
-        string_builder_add_string(a, &sb, _parse_string(a, data_after_each, mapping_lists, this_mapping));
-
-        return string_builder_get_string(a, &sb);  // We are now done, so return early
-        /*-------------------------------------------------------------------------------------------------------*/
-      } else if (string_equals(command, string_literal("#sum"))) {
-        /*------*/
-        /* #sum */
-        /*-------------------------------------------------------------------------------------------------------*/
-        LinkNode *members = string_split(a, argument, string_literal("."));
-        String list_name = link_node_get_container_node(members->next, StringNode, node)->data;
-
-        for (LinkNode *p = mapping_lists.list_mappings->next; p != mapping_lists.list_mappings; p = p->next) {
-          ListMapping this_list_mapping = link_node_get_container_node(p, ListMappingNode, node)->data;
-
-          if (!string_equals(this_list_mapping.name, list_name)) {
-            if (p->next == mapping_lists.list_mappings) {
-              abort("No mapping found for #sum argument '%" Stringf "'", stringf_args(list_name));
-            }
-            continue;
-          }
-
-          U64 items_member_offset = 0;
-          DisplayType items_display_type = this_list_mapping.item_display_type;
-          String items_struct_name = this_list_mapping.item_struct_name;
-
-          // Loop to get the location and display type of the desired member of the first item
-          for (LinkNode *member_node = members->next->next; member_node != members;
-               member_node = member_node->next) {
-            String member_name = link_node_get_container_node(member_node, StringNode, node)->data;
-            // Check through all the member mappings for one matching this name
-            for (LinkNode *mapping_node = mapping_lists.member_mappings->next;
-                 mapping_node != mapping_lists.member_mappings; mapping_node = mapping_node->next) {
-              MemberMapping this_member_mapping =
-                  link_node_get_container_node(mapping_node, MemberMappingNode, node)->data;
-
-              if (string_equals(member_name, this_member_mapping.name) &&
-                  string_equals(items_struct_name, this_member_mapping.struct_name)) {
-                items_member_offset += this_member_mapping.offset;
-                items_display_type = this_member_mapping.display_type;
-                items_struct_name =
-                    string_concat(a, 3, items_struct_name, string_literal("."), this_member_mapping.struct_name);
-                break;
-              }
-
-              if (mapping_node->next == mapping_lists.member_mappings) {
-                abort("No mapping found for member '%" Stringf "' of '%" Stringf "'", stringf_args(member_name),
-                      stringf_args(items_struct_name));
-              }
-            }
-          }
-
-          union {
-            F32 currency;
-          } result = {0};
-
-          // Now loop through each item and sum the result
-          for (LinkNode *item_node = this_list_mapping.items->next; item_node != this_list_mapping.items;
-               item_node = item_node->next) {
-            // The list mapping contains a pointer to the linked list of the actual item values. Since we don't
-            // know what type these are, we need to use the item node offset stored in the list mapping to get the
-            // container node's data. We then add the member's offset to get a pointer to the member we want. If
-            // I'm being completely honest, this code is rubbish
-            void *item = (U8 *)item_node - this_list_mapping.item_node_offset + items_member_offset;
-
-            switch (items_display_type) {
-              case (DISPLAY_TYPE_CURRENCY): {
-                result.currency += *((F32 *)item);
-                break;
-              }
-              default: {
-                abort("'%" Stringf "' has unsummable display type '%d'", stringf_args(items_struct_name),
-                      (int)items_display_type);
-              }
-            }
-          }
-
-          String item_output;
-          switch (items_display_type) {
-            case (DISPLAY_TYPE_CURRENCY): {
-              item_output = string_format(a, "%.02" F32f, result.currency);
-              break;
-            }
-            default: {
-              item_output = string_literal("");
-            }
-          }
-
-          string_builder_add_string(a, &sb, item_output);
-        }
-        /*-------------------------------------------------------------------------------------------------------*/
-      } else {
-        abort("Unrecognised command '%" Stringf "'", stringf_args(command));
-      }
-      /*---------------------------------------------------------------------------------------------------------*/
-    } else if (tag_contents.str[0] == '/') {
-      /*------------*/
-      /* / commands */
-      /*---------------------------------------------------------------------------------------------------------*/
-      if (linked_list_get_length(tag_words) != 1) {
-        abort("Got %" U64f " arguments in end command tag (expected 1)", linked_list_get_length(tag_words));
-      }
-      String command = linked_list_get_container_node_at_index(tag_words, 0, StringNode, node)->data;
-
-      if (string_equals(command, string_literal("/each"))) {
-        /*-------*/
-        /* /each */
-        /*-------------------------------------------------------------------------------------------------------*/
-        // Do nothing for now
-
-        /*-------------------------------------------------------------------------------------------------------*/
-      } else {
-        abort("Unrecognised command termination '% " Stringf "'", stringf_args(command));
-      }
-      /*---------------------------------------------------------------------------------------------------------*/
-    } else {
-      /*-------*/
-      /* items */
-      /*---------------------------------------------------------------------------------------------------------*/
-      if (linked_list_get_length(tag_words) != 1) {
-        abort("Got %" U64f " arguments in item tag (expected 1)", linked_list_get_length(tag_words));
-      }
-
-      String item_name = linked_list_get_container_node_at_index(tag_words, 0, StringNode, node)->data;
-      LinkNode *members = string_split(a, item_name, string_literal("."));
-
-      void *item;
-      DisplayType item_display_type;
-      String item_struct_name;
-
-      // Loop to get the location of the item, and its display type
-      for (LinkNode *member_node = members->next; member_node != members; member_node = member_node->next) {
-        String member_name = link_node_get_container_node(member_node, StringNode, node)->data;
-
-        // The first loop will be an item mapping
-        if (member_node == members->next) {
-          if (string_equals(member_name, string_literal("this"))) {
-            if (this_mapping.item == NULL) {
-              abort("Improper use of 'this'");
-            }
-            item = this_mapping.item;
-            item_display_type = this_mapping.display_type;
-            item_struct_name = this_mapping.struct_name;
-          } else {
-            // Check through all the item mappings for one matching this name
-            for (LinkNode *mapping_node = mapping_lists.item_mappings->next;
-                 mapping_node != mapping_lists.item_mappings; mapping_node = mapping_node->next) {
-              ItemMapping this_item_mapping =
-                  link_node_get_container_node(mapping_node, ItemMappingNode, node)->data;
-
-              if (string_equals(member_name, this_item_mapping.name)) {
-                item = this_item_mapping.item;
-                item_display_type = this_item_mapping.display_type;
-                item_struct_name = this_item_mapping.struct_name;
-                break;
-              }
-
-              if (mapping_node->next == mapping_lists.item_mappings) {
-                abort("No mapping found for item '% " Stringf "'", stringf_args(member_name));
-              }
-            }
-          }
-        } else {  // After the first, each loop will be a member mapping
-          // Check through all the member mappings for one matching this name
-          for (LinkNode *mapping_node = mapping_lists.member_mappings->next;
-               mapping_node != mapping_lists.member_mappings; mapping_node = mapping_node->next) {
-            MemberMapping this_member_mapping =
-                link_node_get_container_node(mapping_node, MemberMappingNode, node)->data;
-
-            if (string_equals(member_name, this_member_mapping.name) &&
-                string_equals(item_struct_name, this_member_mapping.struct_name)) {
-              item = (U8 *)item + this_member_mapping.offset;
-              item_display_type = this_member_mapping.display_type;
-              item_struct_name =
-                  string_concat(a, 3, item_struct_name, string_literal("."), this_member_mapping.struct_name);
-              break;
-            }
-
-            if (mapping_node->next == mapping_lists.member_mappings) {
-              abort("No mapping found for member '%" Stringf "' of '%" Stringf "'", stringf_args(member_name),
-                    stringf_args(item_struct_name));
-            }
-          }
-        }
-      }
-
-      String item_output;
-
-      switch (item_display_type) {
-        case DISPLAY_TYPE_NONE: {
-          abort("Got item '%s' with no display type", item_name);
-        }
-        case DISPLAY_TYPE_CURRENCY: {
-          item_output = string_format(a, "%.02" F32f, *((F32 *)item));
-          break;
-        }
-        case DISPLAY_TYPE_DATE: {
-          item_output = date_get_string(a, *((Date *)item), date_format, day_of_week_format);
-          break;
-        }
-        case DISPLAY_TYPE_TEXT: {
-          item_output = *((String *)item);
-          break;
-        }
-      }
-
-      string_builder_add_string(a, &sb, item_output);
-      /*---------------------------------------------------------------------------------------------------------*/
-    }
-
-    cursor_pos = close_pos + parse_tag_closer.len;
-  }
-
-  string_builder_add_string(a, &sb, string_init_substring(data, cursor_pos, data.len));
-
-  return string_builder_get_string(a, &sb);
-}
-
-String parse_string(Arena *a, String data, const MappingLists mapping_lists) {
-  return _parse_string(a, data, mapping_lists, (ItemMapping){0});
 }
