@@ -191,7 +191,7 @@ void web_server(void) {
   // Worryingly this arena getting filled up will crash the program. Uhhhh will fix later
   Arena transactions_arena = arena_init(16384);
   LinkNode *transactions = retrieve_transactions(&transactions_arena, string_literal("test.dat"));
-  U32 num_add_transaction_inputs = 4;  // Placeholder
+  U32 num_add_transaction_inputs = 10;  // Placeholder
   MappingInput mapping_input = {.transactions = transactions,
                                 .num_add_transaction_inputs = &num_add_transaction_inputs};
   const MappingLists mapping_lists = mapping_lists_init(&transactions_arena, mapping_input);

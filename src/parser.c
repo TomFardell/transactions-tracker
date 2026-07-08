@@ -234,6 +234,9 @@ static void *internal_type_get_data_from_item_node(const LinkNode *item_node, In
     case INTERNAL_TYPE_F32: {
       return &link_node_get_container_node(item_node, F32Node, node)->data;
     }
+    case INTERNAL_TYPE_F64: {
+      return &link_node_get_container_node(item_node, F64Node, node)->data;
+    }
     case INTERNAL_TYPE_STRING: {
       return &link_node_get_container_node(item_node, StringNode, node)->data;
     }
@@ -257,6 +260,12 @@ static String types_get_string_output(Arena *a, const void *item, InternalType i
       switch (internal_type) {
         case (INTERNAL_TYPE_F32): {
           return string_format(a, "£%.02" F32f, *((F32 *)item));
+        }
+        case (INTERNAL_TYPE_F64): {
+          return string_format(a, "£%.02" F64f, *((F64 *)item));
+        }
+        case (INTERNAL_TYPE_U32): {
+          return string_format(a, "£%.02" U32f, *((U32 *)item));
         }
 
         default: {
@@ -282,6 +291,9 @@ static String types_get_string_output(Arena *a, const void *item, InternalType i
         case (INTERNAL_TYPE_F32): {
           return string_format(a, "%.02" F32f, *((F32 *)item));
         }
+        case (INTERNAL_TYPE_F64): {
+          return string_format(a, "%.02" F64f, *((F64 *)item));
+        }
         case (INTERNAL_TYPE_U32): {
           return string_format(a, "%" U32f, *((U32 *)item));
         }
@@ -306,6 +318,27 @@ static String types_get_string_output(Arena *a, const void *item, InternalType i
 
     default: {
       abort("Cannot display item with display type '%d'", (int)display_type);
+    }
+  }
+}
+
+// Given a pointer to some data and its internal type, cast the value of the data to an F64
+F64 internal_type_cast_to_F64(const void *item, InternalType internal_type) {
+  switch (internal_type) {
+    case INTERNAL_TYPE_DATE: {
+      return (F64)(*((Date *)item));
+    }
+    case INTERNAL_TYPE_F32: {
+      return (F64)(*((F32 *)item));
+    }
+    case INTERNAL_TYPE_F64: {
+      return *((F64 *)item);
+    }
+    case INTERNAL_TYPE_U32: {
+      return (F64)(*((U32 *)item));
+    }
+    default: {
+      abort("Cannot convert item of internal type '%" U64f "' to F64", internal_type);
     }
   }
 }
@@ -407,6 +440,12 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
 
       union {
         F32 currency_f32;
+        F64 currency_f64;
+        U32 currency_u32;
+        F32 number_f32;
+        F64 number_f64;
+        U32 number_u32;
+        String text_string;
       } result = {0};
 
       // Now loop through each item and sum the result
@@ -422,9 +461,61 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
                 result.currency_f32 += *((F32 *)item);
                 break;
               }
+              case INTERNAL_TYPE_F64: {
+                result.currency_f64 += *((F64 *)item);
+                break;
+              }
+              case INTERNAL_TYPE_U32: {
+                result.currency_u32 += *((U32 *)item);
+                break;
+              }
               default: {
-                abort("Unable to treat internal type '%d' as a currency for '%" Stringf "'",
-                      (int)list_mapping.item_internal_type, stringf_args(argument));
+                abort("Unable to sum the list '%" Stringf "' of item internal types '%d' as a currency",
+                      stringf_args(argument), (int)list_mapping.item_internal_type);
+              }
+            }
+            break;
+          }
+          // Obviously this is the exact same as currency, but maybe in the future we'd want to sum this slightly
+          // differently, hence the union gets a bunch more elements!
+          case (DISPLAY_TYPE_NUMBER): {
+            switch (member_info.internal_type) {
+              case INTERNAL_TYPE_F32: {
+                result.number_f32 += *((F32 *)item);
+                break;
+              }
+              case INTERNAL_TYPE_F64: {
+                result.number_f64 += *((F64 *)item);
+                break;
+              }
+              case INTERNAL_TYPE_U32: {
+                result.number_u32 += *((U32 *)item);
+                break;
+              }
+              default: {
+                abort("Unable to sum the list '%" Stringf "' of item internal types '%d' as a number",
+                      stringf_args(argument), (int)list_mapping.item_internal_type);
+              }
+            }
+            break;
+          }
+
+          // This is stupid and I'll probably never use it, but we can sum (concatenate) strings
+          case (DISPLAY_TYPE_TEXT): {
+            switch (member_info.internal_type) {
+              case INTERNAL_TYPE_STRING: {
+                // If we are in the first iteration, there is nothing to append to
+                if (item_node == list_mapping.items->next) {
+                  result.text_string = *((String *)item);
+                } else {
+                  result.text_string = string_append(a, result.text_string, *((String *)item));
+                }
+                break;
+              }
+              // Maybe I'll eventually allow concatenation of numeric types as strings (i.e. 1 + 1 == 11)
+              default: {
+                abort("Unable to sum the list '%" Stringf "' of item internal types '%d' as a string",
+                      stringf_args(argument), (int)list_mapping.item_internal_type);
               }
             }
             break;
@@ -450,30 +541,64 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
       if (linked_list_get_length(tag_words) != 4) {
         abort("Got %" U64f " arguments in '#each' command tag (expected 4)", linked_list_get_length(tag_words));
       }
-      String identifier1 = linked_list_get_container_node_at_index(tag_words, 1, StringNode, node)->data;
+      String identifiers[2] = {linked_list_get_container_node_at_index(tag_words, 1, StringNode, node)->data,
+                               linked_list_get_container_node_at_index(tag_words, 3, StringNode, node)->data};
       String operator = linked_list_get_container_node_at_index(tag_words, 2, StringNode, node)->data;
-      String identifier2 = linked_list_get_container_node_at_index(tag_words, 3, StringNode, node)->data;
 
-      // Placeholder
-      String item_output1, item_output2;
-      if ('0' <= identifier1.str[0] && identifier1.str[0] <= '9') {
-        item_output1 = identifier1;
-      } else {
-        VarInfo var_info1 = mapping_lists_get_var_info_from_item_name(mapping_lists, identifier1, this_mapping);
-        item_output1 = types_get_string_output(a, var_info1.item, var_info1.internal_type, var_info1.display_type);
-      }
-      if ('0' <= identifier2.str[0] && identifier2.str[0] <= '9') {
-        item_output2 = identifier2;
-      } else {
-        VarInfo var_info2 = mapping_lists_get_var_info_from_item_name(mapping_lists, identifier2, this_mapping);
-        item_output2 = types_get_string_output(a, var_info2.item, var_info2.internal_type, var_info2.display_type);
-      }
-      String if_output =
-          string_format(a, "<!--<<if %" Stringf " %" Stringf " %" Stringf ">>-->", stringf_args(item_output1),
-                        stringf_args(operator), stringf_args(item_output2));
+      // These F64s are only used if their respective identifiers are literals. In the code below we are going to
+      // just do all the comparisons with all data casted to F64s. I suppose there are cases where we might get
+      // incorrect comparisons if we lose precision due to using F64s, i.e. if we are comparing a huge U64 to a
+      // huge literal. However, using F64s for all literals here should suffice for any normal use
+      F64 values[2];
 
-      string_builder_add_string(a, sb, if_output);
-      cursor_pos = next_tag_closer_pos + parse_tag_closer.len;
+      for (I32 i = 0; i < 2; ++i) {
+        // Anything beginning with a number, a '.' or a '-' cannot be an identifier, so treat as a literal
+        char first_char = identifiers[i].str[0];
+        if (('0' <= first_char && first_char <= '9') || first_char == '.' || first_char == '-') {
+          error_check(sscanf(string_get_cstring(a, identifiers[i]), "%" F64f, values + i));
+        } else {
+          VarInfo var_info =
+              mapping_lists_get_var_info_from_item_name(mapping_lists, identifiers[i], this_mapping);
+          values[i] = internal_type_cast_to_F64(var_info.item, var_info.internal_type);
+        }
+      }
+
+      bool if_tag_evaluation;
+
+      if (string_equals(operator, string_literal("=="))) {
+        if_tag_evaluation = F64_eq(values[0], values[1]);
+      } else if (string_equals(operator, string_literal("<"))) {
+        if_tag_evaluation = F64_lt(values[0], values[1]);
+      } else if (string_equals(operator, string_literal("<="))) {
+        if_tag_evaluation = F64_leq(values[0], values[1]);
+      } else if (string_equals(operator, string_literal(">"))) {
+        if_tag_evaluation = F64_gt(values[0], values[1]);
+      } else if (string_equals(operator, string_literal(">="))) {
+        if_tag_evaluation = F64_geq(values[0], values[1]);
+      } else if (string_equals(operator, string_literal("!="))) {
+        if_tag_evaluation = F64_neq(values[0], values[1]);
+      } else {
+        abort("Unknown comparison operator '% " Stringf "' in '#if' command", stringf_args(operator));
+      }
+
+      U64 closing_tag_opener_pos = find_closing_tag_pos(data, string_literal("if"));
+      if (closing_tag_opener_pos == U64NULL) {
+        abort("No closing '/if' tag for '#if' command");
+      }
+
+      String data_between_tags =
+          string_init_substring(data, next_tag_closer_pos + parse_tag_closer.len, closing_tag_opener_pos);
+
+      // Only recurse on the contents of the #if block if its condition evaluated to true
+      if (if_tag_evaluation) {
+        _parse_string(a, data_between_tags, mapping_lists, this_mapping, sb);
+      }
+
+      // Place the cursor after the closing /if tag
+      cursor_pos =
+          closing_tag_opener_pos +
+          string_find_first(string_init_substring(data, closing_tag_opener_pos, data.len), parse_tag_closer) +
+          parse_tag_closer.len;
       /*-------------------------------------------------------------------------------------------------------*/
     } else {
       abort("Unrecognised command '#%" Stringf "'", stringf_args(command));
