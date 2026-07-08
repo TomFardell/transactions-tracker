@@ -23,12 +23,12 @@
 		</form>
 		<br>
 		<form method="post">
-			<!--[[#each num_add_transaction_inputs]]-->
+			<!--{{#iter num_add_transaction_inputs}}-->
 			<input type="date" name=".date">
 			<input type="text" name=".desc">
 			<input type="text" name=".amount">
-			<!--[[/each]]-->
 			<br>
+			<!--{{/iter}}-->
 			<button type="submit" name="instruction" value="add_to-transactions">add</button>
 		</form>
 	</body>

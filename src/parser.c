@@ -600,6 +600,59 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
           string_find_first(string_init_substring(data, closing_tag_opener_pos, data.len), parse_tag_closer) +
           parse_tag_closer.len;
       /*-------------------------------------------------------------------------------------------------------*/
+    } else if (string_equals(command, string_literal("#iter"))) {
+      /*-------*/
+      /* #iter */
+      /*-------------------------------------------------------------------------------------------------------*/
+      if (linked_list_get_length(tag_words) != 2) {
+        abort("Got %" U64f " arguments in '#iter' command tag (expected 2)", linked_list_get_length(tag_words));
+      }
+      String argument = linked_list_get_container_node_at_index(tag_words, 1, StringNode, node)->data;
+
+      U64 closing_tag_opener_pos = find_closing_tag_pos(data, string_literal("iter"));
+      if (closing_tag_opener_pos == U64NULL) {
+        abort("No closing '/iter' tag for '#iter' command");
+      }
+
+      String data_between_tags =
+          string_init_substring(data, next_tag_closer_pos + parse_tag_closer.len, closing_tag_opener_pos);
+
+      VarInfo var_info = mapping_lists_get_var_info_from_item_name(mapping_lists, argument, this_mapping);
+
+      if (var_info.internal_type != INTERNAL_TYPE_U32) {
+      }
+
+      U64 iter_count;
+      switch (var_info.internal_type) {
+        case (INTERNAL_TYPE_U32): {
+          iter_count = *((U32 *)var_info.item);
+          break;
+        }
+        default: {
+          abort("Cannot iterate over item of internal type '%d'", (int)var_info.internal_type);
+        }
+      }
+
+      U64 *i = arena_alloc_single(a, U64);
+      ItemMapping this_item_mapping = {
+          .item = i,
+          .name = string_literal("this"),  // Not really needed
+          .struct_name = string_literal("U64"),
+          .display_type = var_info.display_type,
+          .internal_type = var_info.internal_type,
+      };
+
+      // Iterate. Can then use 'this' to retreive the iteration index
+      for (*i = 0; *i < iter_count; ++(*i)) {
+        _parse_string(a, data_between_tags, mapping_lists, this_item_mapping, sb);
+      }
+
+      // Place the cursor after the closing /iter tag
+      cursor_pos =
+          closing_tag_opener_pos +
+          string_find_first(string_init_substring(data, closing_tag_opener_pos, data.len), parse_tag_closer) +
+          parse_tag_closer.len;
+      /*-------------------------------------------------------------------------------------------------------*/
     } else {
       abort("Unrecognised command '#%" Stringf "'", stringf_args(command));
     }
@@ -622,6 +675,14 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
       cursor_pos = next_tag_closer_pos + parse_tag_closer.len;
       /*-------------------------------------------------------------------------------------------------------*/
     } else if (string_equals(command, string_literal("/if"))) {
+      /*-----*/
+      /* /if */
+      /*-------------------------------------------------------------------------------------------------------*/
+      // Do nothing but move the cursor
+
+      cursor_pos = next_tag_closer_pos + parse_tag_closer.len;
+      /*-------------------------------------------------------------------------------------------------------*/
+    } else if (string_equals(command, string_literal("/iter"))) {
       /*-----*/
       /* /if */
       /*-------------------------------------------------------------------------------------------------------*/
