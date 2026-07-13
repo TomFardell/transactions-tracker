@@ -14,6 +14,7 @@
 #include "base/definitions.h"
 #include "base/string.h"
 #include "constants.h"
+#include "handler.h"
 #include "helpers.h"
 #include "network.h"
 #include "parser.h"
@@ -128,18 +129,24 @@ void handle_get(Arena *string_arena, String request_arg, MappingLists mapping_li
   send_200(sockfd, string_get_cstring(string_arena, parsed_path));
 }
 
-void handle_post(const LinkNode *request_header_body) {
+void handle_post(const LinkNode *request_header_body, MappingLists mapping_lists) {
   if (linked_list_get_length(request_header_body) <= 1) {
     printf("Ignoring POST request with no message body\n");
     return;
   }
 
   String request_body = linked_list_get_container_node_at_index(request_header_body, 1, StringNode, node)->data;
-  printf("Received POST request with body '%" Stringf "'\n", stringf_args(request_body));
+  printf("Received POST request with body:\n%" Stringf "\n", stringf_args(request_body));
+
+  if (handle_post_data(mapping_lists, request_body)) {
+    printf("POST request handled successfully\n");
+  } else {
+    printf("POST request not handled\n");
+  }
 }
 
 // Given a socket file descriptor for an accepted incoming connection, receive and handle a single request
-void handle_client(int in_sockfd, const MappingLists mapping_lists) {
+void handle_client(int in_sockfd, MappingLists mapping_lists) {
   char buffer[RECV_BUFFER_SIZE];
 
   ssize_t bytes_received = recv_request(in_sockfd, buffer, sizeof(buffer));
@@ -178,7 +185,7 @@ void handle_client(int in_sockfd, const MappingLists mapping_lists) {
   if (string_equals(request_type, string_literal("GET"))) {
     handle_get(&string_arena, request_arg, mapping_lists, in_sockfd);
   } else if (string_equals(request_type, string_literal("POST"))) {
-    handle_post(request_header_body);
+    handle_post(request_header_body, mapping_lists);
     handle_get(&string_arena, request_arg, mapping_lists, in_sockfd);  // Also send the requested file
   } else {
     printf("Ignoring unexpected request of type '%" Stringf "'\n", stringf_args(request_type));

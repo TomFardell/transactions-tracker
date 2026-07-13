@@ -32,13 +32,15 @@ F32 my_balance = 32.74;     // CURRENCY display type
 Then we can insert these values into the parsed HTML:
 
 ```html
-<p>My point is (<!--{{my_point.x}}-->, <!--{{my_point.y}}-->) and my balance is <!--{{my_balance}}--></p>
+<p>My point is (<!--{{my_point.x}}-->, <!--{{my_point.y}}-->)</p>
+<p>My balance is <!--{{my_balance}}--></p>
 ```
 
 After parsing, we see:
 
 ```html
-<p>My point is (2, 3) and my balance is £32.74</p>
+<p>My point is (2, 3)</p>
+<p>My balance is £32.74</p>
 ```
 
 ### Commands

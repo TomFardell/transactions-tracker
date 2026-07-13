@@ -13,6 +13,7 @@ extern const DateFormat date_format;
 extern const DayOfWeekFormat day_of_week_format;
 extern const String parse_tag_opener;
 extern const String parse_tag_closer;
+extern const String instruction_label;
 
 #endif  // CONSTANTS_H
 
