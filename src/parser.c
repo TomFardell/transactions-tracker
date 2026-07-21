@@ -32,6 +32,7 @@ MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input) {
   linked_list_push_back(result.list_mappings, &list_mapping_node->node);
 
   ItemMappingNode *item_mapping_node;
+
   item_mapping_node = arena_alloc_single(a, ItemMappingNode);
   item_mapping_node->data.item = mapping_input.num_add_transaction_inputs;
   item_mapping_node->data.name = string_literal("num_add_transaction_inputs");
@@ -77,7 +78,7 @@ ListMapping mapping_lists_locate_list_mapping(MappingLists mapping_lists, String
       return this_list_mapping;
     }
   }
-  abort("Unable to find list mapping of name '%" Stringf "'", stringf_args(list_mapping_name));
+  return (ListMapping){.item_internal_type = INTERNAL_TYPE_NULL};
 }
 
 ItemMapping mapping_lists_locate_item_mapping(MappingLists mapping_lists, String item_mapping_name) {
@@ -88,7 +89,7 @@ ItemMapping mapping_lists_locate_item_mapping(MappingLists mapping_lists, String
       return this_item_mapping;
     }
   }
-  abort("Unable to find item mapping of name '%" Stringf "'", stringf_args(item_mapping_name));
+  return (ItemMapping){.internal_type = INTERNAL_TYPE_NULL};
 }
 
 MemberMapping mapping_lists_locate_member_mapping(MappingLists mapping_lists, String member_mapping_struct_name,
@@ -102,8 +103,26 @@ MemberMapping mapping_lists_locate_member_mapping(MappingLists mapping_lists, St
       return this_member_mapping;
     }
   }
-  abort("Unable to find member mapping of name '%" Stringf "' and type '%" Stringf "'",
-        stringf_args(member_mapping_name), stringf_args(member_mapping_struct_name));
+
+  return (MemberMapping){.internal_type = INTERNAL_TYPE_NULL};
+}
+
+LinkNode *mapping_lists_get_member_mappings_for_struct(Arena *a, MappingLists mapping_lists, String struct_name) {
+  LinkNode *result = arena_alloc_single(a, LinkNode);
+  linked_list_init(result);
+
+  for (LinkNode *mapping_node = mapping_lists.member_mappings->next; mapping_node != mapping_lists.member_mappings;
+       mapping_node = mapping_node->next) {
+    MemberMapping this_member_mapping = link_node_get_container_node(mapping_node, MemberMappingNode, node)->data;
+
+    if (string_equals(this_member_mapping.struct_name, struct_name)) {
+      MemberMappingNode *new_mapping_node = arena_alloc_single(a, MemberMappingNode);
+      new_mapping_node->data = this_member_mapping;
+      linked_list_push_back(result, &new_mapping_node->node);
+    }
+  }
+
+  return result;
 }
 
 // Return type of mapping_lists_get_member_info_from_path
@@ -133,6 +152,10 @@ static MemberInfo mapping_lists_get_member_info_from_path(MappingLists mapping_l
 
     MemberMapping member_mapping =
         mapping_lists_locate_member_mapping(mapping_lists, member_path_so_far, member_name);
+    if (member_mapping.internal_type == INTERNAL_TYPE_NULL) {
+      abort("Couldn't locate item mapping '%" Stringf "." Stringf "'", stringf_args(member_path_so_far),
+            stringf_args(member_name));
+    }
 
     member_offset += member_mapping.offset;
     member_display_type = member_mapping.display_type;
@@ -164,6 +187,9 @@ static VarInfo mapping_lists_get_var_info_from_item_name(MappingLists mapping_li
     item_mapping = this_mapping;
   } else {
     item_mapping = mapping_lists_locate_item_mapping(mapping_lists, item_name);
+    if (item_mapping.internal_type == INTERNAL_TYPE_NULL) {
+      abort("Couldn't locate item mapping '%" Stringf "'", stringf_args(item_name));
+    }
   }
 
   void *item = item_mapping.item;
@@ -394,6 +420,9 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
 
       // Search for a matching list mapping
       ListMapping list_mapping = mapping_lists_locate_list_mapping(mapping_lists, argument);
+      if (list_mapping.item_internal_type == INTERNAL_TYPE_NULL) {
+        abort("Couldn't locate list mapping '%" Stringf "'", stringf_args(argument));
+      }
 
       // Loop through the actual items
       for (LinkNode *item_node = list_mapping.items->next; item_node != list_mapping.items;
@@ -429,6 +458,9 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
 
       // Search for a matching list mapping
       ListMapping list_mapping = mapping_lists_locate_list_mapping(mapping_lists, list_name);
+      if (list_mapping.item_internal_type == INTERNAL_TYPE_NULL) {
+        abort("Couldn't locate list mapping '%" Stringf "'", stringf_args(list_name));
+      }
 
       // Replace the list name with its struct name and get the offset and display type of the member
       StringNode *base_type_name_node = arena_alloc_single(a, StringNode);

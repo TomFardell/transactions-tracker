@@ -31,8 +31,32 @@ static String request_body_get_instruction(String request_body) {
 }
 
 bool handle_post_data(MappingLists mapping_lists, String request_body) {
-  String instruction = request_body_get_instruction(request_body);
-  printf("Instruction: %" Stringf "\n", stringf_args(instruction));
+  Arena a = arena_init(2048);
 
+  String instruction_string = request_body_get_instruction(request_body);
+  LinkNode *instruction_list = string_split(&a, instruction_string, string_literal("-"));
+  String instruction_name = linked_list_get_container_node_at_index(instruction_list, 0, StringNode, node)->data;
+  LinkNode *instruction_arguments = instruction_list->next;
+
+  if (string_equals(instruction_name, string_literal("*add_to"))) {
+    if (linked_list_get_length(instruction_arguments) != 1) {
+      printf("Got '%" Stringf "' instruction with %" U64f "arguments\n", stringf_args(instruction_name),
+             linked_list_get_length(instruction_arguments));
+      goto return_false;
+    }
+
+    String list_name = linked_list_get_container_node_at_index(instruction_arguments, 0, StringNode, node)->data;
+    ListMapping list_mapping = mapping_lists_locate_list_mapping(mapping_lists, list_name);
+    if (list_mapping.item_internal_type == INTERNAL_TYPE_NULL) {
+      printf("Couldn't locate list mapping '%" Stringf "'\n", stringf_args(list_name));
+      goto return_false;
+    }
+  } else {
+    printf("Got unrecognised instruction '%" Stringf "'\n", stringf_args(instruction_name));
+    goto return_false;
+  }
+
+return_false:
+  arena_free(&a);
   return false;
 }

@@ -86,13 +86,18 @@ typedef struct MappingLists {
 // Initialise the mapping lists required by the parser, allocating them on the passed arena
 MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input);
 
-// Locate a list mapping of a given name in the passed mapping lists. Aborts if not found
+// Locate a list mapping of a given name in the passed mapping lists. Returns a list mapping with a null item
+// internal type if not located
 ListMapping mapping_lists_locate_list_mapping(MappingLists mapping_lists, String list_mapping_name);
-// Locate an item mapping of a given name in the passed mapping lists. Aborts if not found
+// Locate an item mapping of a given name in the passed mapping lists. Returns an item mapping with a null internal
+// type if not located
 ItemMapping mapping_lists_locate_item_mapping(MappingLists mapping_lists, String item_mapping_name);
-// Locate a matching struct mapping in the passed mapping lists. Aborts if not found
+// Locate a matching struct mapping in the passed mapping lists. Returns a member mapping with a null internal type
+// if not located
 MemberMapping mapping_lists_locate_member_mapping(MappingLists mapping_lists, String member_mapping_struct_name,
                                                   String member_mapping_name);
+// Given the name of a struct, return a list of all members of that struct that have a mapping set up
+LinkNode *mapping_lists_get_member_mappings_for_struct(Arena *a, MappingLists mapping_lists, String struct_name);
 
 // Parse the given string, storing the result on the given arena
 String parse_string(Arena *a, String data, const MappingLists mapping_lists);
