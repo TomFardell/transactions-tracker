@@ -6,50 +6,74 @@
 #include "base/definitions.h"
 #include "base/string.h"
 
-// Given a request body and a label, get all values that follow that label, i.e. the body contains 'label=value'
-static LinkNode *request_body_get_value_for_label(Arena *a, String request_body, String label) {
+typedef struct LabelValuePair {
+  String label;
+  String value;
+} LabelValuePair;
+
+typedef struct LabelValuePairNode {
+  LabelValuePair data;
+  LinkNode node;
+} LabelValuePairNode;
+
+// Parse the request body into a linked list of pairs of labels and values
+static LinkNode *request_body_get_label_value_pairs(Arena *a, String request_body) {
   LinkNode *result = arena_alloc_single(a, LinkNode);
   linked_list_init(result);
 
-  LinkNode *label_value_pairs = string_split(a, request_body, string_literal("&"));
-  for (LinkNode *pair = label_value_pairs->next; pair != label_value_pairs; pair = pair->next) {
+  LinkNode *label_value_strings = string_split(a, request_body, string_literal("&"));
+  for (LinkNode *pair = label_value_strings->next; pair != label_value_strings; pair = pair->next) {
     String pair_string = link_node_get_container_node(pair, StringNode, node)->data;
+
     LinkNode *label_and_value = string_split(a, pair_string, string_literal("="));
     if (linked_list_get_length(label_and_value) != 2) {
       continue;
     }
 
     String this_label = linked_list_get_container_node_at_index(label_and_value, 0, StringNode, node)->data;
-    LinkNode *this_value_node = linked_list_get_node_at_index(label_and_value, 1);
+    String this_value = linked_list_get_container_node_at_index(label_and_value, 1, StringNode, node)->data;
 
-    if (string_equals(this_label, label)) {
-      // We allocated on the passed arena and are finished with the previous linked list so it is fine to reassign
-      // this node like this (I think!)
-      linked_list_push_back(result, this_value_node);
+    LabelValuePairNode *this_pair_node = arena_alloc_single(a, LabelValuePairNode);
+    this_pair_node->data = (LabelValuePair){this_label, this_value};
+
+    linked_list_push_back(result, &this_pair_node->node);
+  }
+
+  return result;
+}
+
+// Given a parsed request body and a label, get strings for all values that follow that label
+static LinkNode *label_value_pairs_get_values_from_label(Arena *a, LinkNode *label_value_pairs, String label) {
+  LinkNode *result = arena_alloc_single(a, LinkNode);
+  linked_list_init(result);
+
+  for (LinkNode *pair_node = label_value_pairs->next; pair_node != label_value_pairs;
+       pair_node = pair_node->next) {
+    LabelValuePair pair = link_node_get_container_node(pair_node, LabelValuePairNode, node)->data;
+
+    if (string_equals(pair.label, label)) {
+      StringNode *value_string_node = arena_alloc_single(a, StringNode);
+      value_string_node->data = pair.value;
+      linked_list_push_back(result, &value_string_node->node);
     }
   }
 
   return result;
 }
 
-// Given a request body, parse the instruction name. Returns an empty string if no instruction found
-static String request_body_get_instruction(Arena *a, String request_body) {
-  LinkNode *instructions_found = request_body_get_value_for_label(a, request_body, string_literal("*instruction"));
-  if (linked_list_get_length(instructions_found) != 1) {
-    return string_literal("");
-  }
-
-  return linked_list_get_container_node_at_index(instructions_found, 0, StringNode, node)->data;
-}
-
 bool handle_post_data(MappingLists mapping_lists, String request_body) {
   Arena a = arena_init(2048);
 
-  String instruction_string = request_body_get_instruction(&a, request_body);
-  if (string_equals(instruction_string, string_literal(""))) {
-    printf("Got request with no instruction\n");
+  LinkNode *label_value_pairs = request_body_get_label_value_pairs(&a, request_body);
+
+  LinkNode *instructions =
+      label_value_pairs_get_values_from_label(&a, label_value_pairs, string_literal("*instruction"));
+  if (linked_list_get_length(instructions) != 1) {
+    printf("Got request with %" U64f " instructions\n", linked_list_get_length(instructions));
     goto return_false;
   }
+
+  String instruction_string = linked_list_get_container_node_at_index(instructions, 0, StringNode, node)->data;
 
   LinkNode *instruction_arguments = string_split(&a, instruction_string, string_literal("-"));
   String instruction_name =
