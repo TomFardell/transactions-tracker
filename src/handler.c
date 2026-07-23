@@ -5,35 +5,52 @@
 
 #include "base/definitions.h"
 #include "base/string.h"
-#include "constants.h"
+
+// Given a request body and a label, get all values that follow that label, i.e. the body contains 'label=value'
+static LinkNode *request_body_get_value_for_label(Arena *a, String request_body, String label) {
+  LinkNode *result = arena_alloc_single(a, LinkNode);
+  linked_list_init(result);
+
+  LinkNode *label_value_pairs = string_split(a, request_body, string_literal("&"));
+  for (LinkNode *pair = label_value_pairs->next; pair != label_value_pairs; pair = pair->next) {
+    String pair_string = link_node_get_container_node(pair, StringNode, node)->data;
+    LinkNode *label_and_value = string_split(a, pair_string, string_literal("="));
+    if (linked_list_get_length(label_and_value) != 2) {
+      continue;
+    }
+
+    String this_label = linked_list_get_container_node_at_index(label_and_value, 0, StringNode, node)->data;
+    LinkNode *this_value_node = linked_list_get_node_at_index(label_and_value, 1);
+
+    if (string_equals(this_label, label)) {
+      // We allocated on the passed arena and are finished with the previous linked list so it is fine to reassign
+      // this node like this (I think!)
+      linked_list_push_back(result, this_value_node);
+    }
+  }
+
+  return result;
+}
 
 // Given a request body, parse the instruction name. Returns an empty string if no instruction found
-static String request_body_get_instruction(String request_body) {
-  U64 instruction_label_pos = string_find_first(request_body, instruction_label);
-  if (instruction_label_pos == U64NULL) {
+static String request_body_get_instruction(Arena *a, String request_body) {
+  LinkNode *instructions_found = request_body_get_value_for_label(a, request_body, string_literal("*instruction"));
+  if (linked_list_get_length(instructions_found) != 1) {
     return string_literal("");
   }
 
-  U64 after_instruction_label_pos = instruction_label_pos + instruction_label.len;
-  if (after_instruction_label_pos > request_body.len || request_body.str[after_instruction_label_pos] != '=') {
-    return string_literal("");
-  }
-
-  String after_instruction_label =
-      string_init_substring(request_body, after_instruction_label_pos + 1, request_body.len);
-
-  U64 instruction_name_end = string_find_first(after_instruction_label, string_literal("&"));
-  if (instruction_name_end == U64NULL) {
-    return after_instruction_label;
-  }
-
-  return string_init_substring(after_instruction_label, 0, instruction_name_end);
+  return linked_list_get_container_node_at_index(instructions_found, 0, StringNode, node)->data;
 }
 
 bool handle_post_data(MappingLists mapping_lists, String request_body) {
   Arena a = arena_init(2048);
 
-  String instruction_string = request_body_get_instruction(request_body);
+  String instruction_string = request_body_get_instruction(&a, request_body);
+  if (string_equals(instruction_string, string_literal(""))) {
+    printf("Got request with no instruction\n");
+    goto return_false;
+  }
+
   LinkNode *instruction_arguments = string_split(&a, instruction_string, string_literal("-"));
   String instruction_name =
       linked_list_get_container_node_at_index(instruction_arguments, 0, StringNode, node)->data;
