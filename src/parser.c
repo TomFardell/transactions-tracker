@@ -71,8 +71,8 @@ MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input) {
 }
 
 ListMapping mapping_lists_locate_list_mapping(MappingLists mapping_lists, String list_mapping_name) {
-  for (LinkNode *p = mapping_lists.list_mappings->next; p != mapping_lists.list_mappings; p = p->next) {
-    ListMapping this_list_mapping = link_node_get_container_node(p, ListMappingNode, node)->data;
+  foreach (mapping_node, mapping_lists.list_mappings) {
+    ListMapping this_list_mapping = link_node_get_data(mapping_node, ListMapping);
 
     if (string_equals(this_list_mapping.name, list_mapping_name)) {
       return this_list_mapping;
@@ -82,8 +82,8 @@ ListMapping mapping_lists_locate_list_mapping(MappingLists mapping_lists, String
 }
 
 ItemMapping mapping_lists_locate_item_mapping(MappingLists mapping_lists, String item_mapping_name) {
-  for (LinkNode *p = mapping_lists.item_mappings->next; p != mapping_lists.item_mappings; p = p->next) {
-    ItemMapping this_item_mapping = link_node_get_container_node(p, ItemMappingNode, node)->data;
+  foreach (mapping_node, mapping_lists.item_mappings) {
+    ItemMapping this_item_mapping = link_node_get_data(mapping_node, ItemMapping);
 
     if (string_equals(this_item_mapping.name, item_mapping_name)) {
       return this_item_mapping;
@@ -94,9 +94,8 @@ ItemMapping mapping_lists_locate_item_mapping(MappingLists mapping_lists, String
 
 MemberMapping mapping_lists_locate_member_mapping(MappingLists mapping_lists, String member_mapping_struct_name,
                                                   String member_mapping_name) {
-  for (LinkNode *mapping_node = mapping_lists.member_mappings->next; mapping_node != mapping_lists.member_mappings;
-       mapping_node = mapping_node->next) {
-    MemberMapping this_member_mapping = link_node_get_container_node(mapping_node, MemberMappingNode, node)->data;
+  foreach (mapping_node, mapping_lists.member_mappings) {
+    MemberMapping this_member_mapping = link_node_get_data(mapping_node, MemberMapping);
 
     if (string_equals(this_member_mapping.name, member_mapping_name) &&
         string_equals(this_member_mapping.struct_name, member_mapping_struct_name)) {
@@ -111,9 +110,8 @@ LinkNode *mapping_lists_get_member_mappings_for_struct(Arena *a, MappingLists ma
   LinkNode *result = arena_alloc_single(a, LinkNode);
   linked_list_init(result);
 
-  for (LinkNode *mapping_node = mapping_lists.member_mappings->next; mapping_node != mapping_lists.member_mappings;
-       mapping_node = mapping_node->next) {
-    MemberMapping this_member_mapping = link_node_get_container_node(mapping_node, MemberMappingNode, node)->data;
+  foreach (mapping_node, mapping_lists.member_mappings) {
+    MemberMapping this_member_mapping = link_node_get_data(mapping_node, MemberMapping);
 
     if (string_equals(this_member_mapping.struct_name, struct_name)) {
       MemberMappingNode *new_mapping_node = arena_alloc_single(a, MemberMappingNode);
@@ -145,10 +143,11 @@ static MemberInfo mapping_lists_get_member_info_from_path(MappingLists mapping_l
   U64 member_offset = 0;
   DisplayType member_display_type;
   InternalType member_internal_type;
-  String member_path_so_far = linked_list_get_container_node_at_index(member_path, 0, StringNode, node)->data;
+  String member_path_so_far = linked_list_get_data_at_index(member_path, 0, String);
 
-  for (LinkNode *p = linked_list_get_node_at_index(member_path, 1); p != member_path; p = p->next) {
-    String member_name = link_node_get_container_node(p, StringNode, node)->data;
+  for (LinkNode *path_node = linked_list_get_node_at_index(member_path, 1); path_node != member_path;
+       path_node = path_node->next) {
+    String member_name = link_node_get_data(path_node, String);
 
     MemberMapping member_mapping =
         mapping_lists_locate_member_mapping(mapping_lists, member_path_so_far, member_name);
@@ -180,7 +179,7 @@ static VarInfo mapping_lists_get_var_info_from_item_name(MappingLists mapping_li
                                                          ItemMapping this_mapping) {
   Arena a = arena_init(512);
   LinkNode *member_path = string_split(&a, item_name, string_literal("."));
-  String base_item_name = linked_list_get_container_node_at_index(member_path, 0, StringNode, node)->data;
+  String base_item_name = linked_list_get_data_at_index(member_path, 0, String);
 
   ItemMapping item_mapping;
   if (string_equals(base_item_name, string_literal("this"))) {
@@ -258,19 +257,19 @@ static void *internal_type_get_data_from_item_node(const LinkNode *item_node, In
       abort("Date nodes currently not implemented");
     }
     case INTERNAL_TYPE_F32: {
-      return &link_node_get_container_node(item_node, F32Node, node)->data;
+      return &link_node_get_data(item_node, F32);
     }
     case INTERNAL_TYPE_F64: {
-      return &link_node_get_container_node(item_node, F64Node, node)->data;
+      return &link_node_get_data(item_node, F64);
     }
     case INTERNAL_TYPE_STRING: {
-      return &link_node_get_container_node(item_node, StringNode, node)->data;
+      return &link_node_get_data(item_node, String);
     }
     case INTERNAL_TYPE_TRANSACTION: {
-      return &link_node_get_container_node(item_node, TransactionNode, node)->data;
+      return &link_node_get_data(item_node, Transaction);
     }
     case INTERNAL_TYPE_U32: {
-      return &link_node_get_container_node(item_node, U32Node, node)->data;
+      return &link_node_get_data(item_node, U32);
     }
     default: {
       abort("Unrecognised internal type '%d'", (int)internal_type);
@@ -325,7 +324,7 @@ static String types_get_string_output(Arena *a, const void *item, InternalType i
         }
 
         default: {
-          abort("Cannot display item of internal type '%d' as integer", (int)internal_type);
+          abort("Cannot display item of internal type '%d' as a number", (int)internal_type);
         }
       }
     }
@@ -399,7 +398,7 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
     /*------------*/
     /* # commands */
     /*---------------------------------------------------------------------------------------------------------*/
-    String command = linked_list_get_container_node_at_index(tag_words, 0, StringNode, node)->data;
+    String command = linked_list_get_data_at_index(tag_words, 0, String);
 
     if (string_equals(command, string_literal("#each"))) {
       /*-------*/
@@ -408,7 +407,7 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
       if (linked_list_get_length(tag_words) != 2) {
         abort("Got %" U64f " arguments in '#each' command tag (expected 2)", linked_list_get_length(tag_words));
       }
-      String argument = linked_list_get_container_node_at_index(tag_words, 1, StringNode, node)->data;
+      String argument = linked_list_get_data_at_index(tag_words, 1, String);
 
       U64 closing_tag_opener_pos = find_closing_tag_pos(data, string_literal("each"));
       if (closing_tag_opener_pos == U64NULL) {
@@ -425,8 +424,7 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
       }
 
       // Loop through the actual items
-      for (LinkNode *item_node = list_mapping.items->next; item_node != list_mapping.items;
-           item_node = item_node->next) {
+      foreach (item_node, list_mapping.items) {
         ItemMapping this_item_mapping = {
             .item = internal_type_get_data_from_item_node(item_node, list_mapping.item_internal_type),
             .name = string_literal("this"),  // Not really needed
@@ -451,10 +449,10 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
       if (linked_list_get_length(tag_words) != 2) {
         abort("Got %" U64f " arguments in '#sum' command tag (expected 2)", linked_list_get_length(tag_words));
       }
-      String argument = linked_list_get_container_node_at_index(tag_words, 1, StringNode, node)->data;
+      String argument = linked_list_get_data_at_index(tag_words, 1, String);
 
       LinkNode *member_path = string_split(a, argument, string_literal("."));
-      String list_name = linked_list_get_container_node_at_index(member_path, 0, StringNode, node)->data;
+      String list_name = linked_list_get_data_at_index(member_path, 0, String);
 
       // Search for a matching list mapping
       ListMapping list_mapping = mapping_lists_locate_list_mapping(mapping_lists, list_name);
@@ -481,8 +479,7 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
       } result = {0};
 
       // Now loop through each item and sum the result
-      for (LinkNode *item_node = list_mapping.items->next; item_node != list_mapping.items;
-           item_node = item_node->next) {
+      foreach (item_node, list_mapping.items) {
         void *item = (U8 *)internal_type_get_data_from_item_node(item_node, list_mapping.item_internal_type) +
                      member_info.offset;
 
@@ -573,13 +570,13 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
       if (linked_list_get_length(tag_words) != 4) {
         abort("Got %" U64f " arguments in '#each' command tag (expected 4)", linked_list_get_length(tag_words));
       }
-      String identifiers[2] = {linked_list_get_container_node_at_index(tag_words, 1, StringNode, node)->data,
-                               linked_list_get_container_node_at_index(tag_words, 3, StringNode, node)->data};
-      String operator = linked_list_get_container_node_at_index(tag_words, 2, StringNode, node)->data;
+      String identifiers[2] = {linked_list_get_data_at_index(tag_words, 1, String),
+                               linked_list_get_data_at_index(tag_words, 3, String)};
+      String operator = linked_list_get_data_at_index(tag_words, 2, String);
 
       // These F64s are only used if their respective identifiers are literals. In the code below we are going to
       // just do all the comparisons with all data casted to F64s. I suppose there are cases where we might get
-      // incorrect comparisons if we lose precision due to using F64s, i.e. if we are comparing a huge U64 to a
+      // incorrect comparisons due to losing precision from this cast, i.e. if we are comparing a huge U64 to a
       // huge literal. However, using F64s for all literals here should suffice for any normal use
       F64 values[2];
 
@@ -639,7 +636,7 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
       if (linked_list_get_length(tag_words) != 2) {
         abort("Got %" U64f " arguments in '#iter' command tag (expected 2)", linked_list_get_length(tag_words));
       }
-      String argument = linked_list_get_container_node_at_index(tag_words, 1, StringNode, node)->data;
+      String argument = linked_list_get_data_at_index(tag_words, 1, String);
 
       U64 closing_tag_opener_pos = find_closing_tag_pos(data, string_literal("iter"));
       if (closing_tag_opener_pos == U64NULL) {
@@ -696,7 +693,7 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
     if (linked_list_get_length(tag_words) != 1) {
       abort("Got %" U64f " arguments in command termination tag (expected 1)", linked_list_get_length(tag_words));
     }
-    String command = linked_list_get_container_node_at_index(tag_words, 0, StringNode, node)->data;
+    String command = linked_list_get_data_at_index(tag_words, 0, String);
 
     if (string_equals(command, string_literal("/each"))) {
       /*-------*/
@@ -734,7 +731,7 @@ static void _parse_string(Arena *a, String data, MappingLists mapping_lists, Ite
       abort("Got %" U64f " arguments in identifier tag (expected 1)", linked_list_get_length(tag_words));
     }
 
-    String item_name = linked_list_get_container_node_at_index(tag_words, 0, StringNode, node)->data;
+    String item_name = linked_list_get_data_at_index(tag_words, 0, String);
 
     VarInfo var_info = mapping_lists_get_var_info_from_item_name(mapping_lists, item_name, this_mapping);
     String item_output = types_get_string_output(a, var_info.item, var_info.internal_type, var_info.display_type);

@@ -135,7 +135,7 @@ void handle_post(const LinkNode *request_header_body, MappingLists mapping_lists
     return;
   }
 
-  String request_body = linked_list_get_container_node_at_index(request_header_body, 1, StringNode, node)->data;
+  String request_body = linked_list_get_data_at_index(request_header_body, 1, String);
   printf("Received POST request with body:\n%" Stringf "\n", stringf_args(request_body));
 
   if (handle_post_data(mapping_lists, request_body)) {
@@ -164,11 +164,10 @@ void handle_client(int in_sockfd, MappingLists mapping_lists) {
   LinkNode *request_header_body =
       string_split(&string_arena, string_init(buffer, bytes_received), string_literal("\r\n\r\n"));
 
-  String request_header = linked_list_get_container_node_at_index(request_header_body, 0, StringNode, node)->data;
+  String request_header = linked_list_get_data_at_index(request_header_body, 0, String);
   LinkNode *request_header_lines = string_split(&string_arena, request_header, string_literal("\r\n"));
 
-  String header_first_line =
-      linked_list_get_container_node_at_index(request_header_lines, 0, StringNode, node)->data;
+  String header_first_line = linked_list_get_data_at_index(request_header_lines, 0, String);
   LinkNode *header_first_line_words = string_split(&string_arena, header_first_line, string_literal(" "));
 
   if (linked_list_get_length(header_first_line_words) != 3) {
@@ -178,9 +177,8 @@ void handle_client(int in_sockfd, MappingLists mapping_lists) {
     return;
   }
 
-  String request_type =
-      linked_list_get_container_node_at_index(header_first_line_words, 0, StringNode, node)->data;
-  String request_arg = linked_list_get_container_node_at_index(header_first_line_words, 1, StringNode, node)->data;
+  String request_type = linked_list_get_data_at_index(header_first_line_words, 0, String);
+  String request_arg = linked_list_get_data_at_index(header_first_line_words, 1, String);
 
   if (string_equals(request_type, string_literal("GET"))) {
     handle_get(&string_arena, request_arg, mapping_lists, in_sockfd);

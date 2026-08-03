@@ -25,8 +25,8 @@ void store_transactions(const String file_name, LinkNode *transactions) {
   FILE *file = error_check_ptr(fopen(string_get_cstring(&file_path_arena, file_path), "w"));
   arena_free(&file_path_arena);
 
-  for (LinkNode *p = transactions->next; p != transactions; p = p->next) {
-    store_transaction(file, link_node_get_container_node(p, TransactionNode, node)->data);
+  foreach (transaction_node, transactions) {
+    store_transaction(file, link_node_get_data(transaction_node, Transaction));
   }
 
   fclose(file);

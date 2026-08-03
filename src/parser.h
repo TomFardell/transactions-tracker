@@ -58,23 +58,9 @@ typedef struct MemberMapping {
   InternalType internal_type;  // Internal type of the member
 } MemberMapping;
 
-// Node containing a list mapping
-typedef struct ListMappingNode {
-  ListMapping data;
-  LinkNode node;
-} ListMappingNode;
-
-// Node containing an item mapping
-typedef struct ItemMappingNode {
-  ItemMapping data;
-  LinkNode node;
-} ItemMappingNode;
-
-// Node containing a member mapping
-typedef struct MemberMappingNode {
-  MemberMapping data;
-  LinkNode node;
-} MemberMappingNode;
+define_node(ListMapping);
+define_node(ItemMapping);
+define_node(MemberMapping);
 
 // Storage of lists of each mapping type
 typedef struct MappingLists {

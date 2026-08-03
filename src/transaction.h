@@ -8,10 +8,7 @@ typedef struct Transaction {
   F32 amount;
 } Transaction;
 
-typedef struct TransactionNode {
-  Transaction data;
-  LinkNode node;
-} TransactionNode;
+define_node(Transaction);
 
 // Initialise a transaction
 Transaction transaction_init(String desc, Date date, F32 amount);
