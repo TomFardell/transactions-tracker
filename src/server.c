@@ -129,7 +129,7 @@ void handle_get(Arena *string_arena, String request_arg, MappingLists mapping_li
   send_200(sockfd, string_get_cstring(string_arena, parsed_path));
 }
 
-void handle_post(const LinkNode *request_header_body, MappingLists mapping_lists) {
+void handle_post(Arena *a, const LinkNode *request_header_body, MappingLists mapping_lists) {
   if (linked_list_get_length(request_header_body) <= 1) {
     printf("Ignoring POST request with no message body\n");
     return;
@@ -138,7 +138,7 @@ void handle_post(const LinkNode *request_header_body, MappingLists mapping_lists
   String request_body = linked_list_get_data_at_index(request_header_body, 1, String);
   printf("Received POST request with body:\n%" Stringf "\n", stringf_args(request_body));
 
-  if (handle_post_data(mapping_lists, request_body)) {
+  if (handle_post_data(a, mapping_lists, request_body)) {
     printf("POST request handled successfully\n");
   } else {
     printf("POST request not handled\n");
@@ -146,7 +146,7 @@ void handle_post(const LinkNode *request_header_body, MappingLists mapping_lists
 }
 
 // Given a socket file descriptor for an accepted incoming connection, receive and handle a single request
-void handle_client(int in_sockfd, MappingLists mapping_lists) {
+void handle_client(Arena *mappings_arena, int in_sockfd, MappingLists mapping_lists) {
   char buffer[RECV_BUFFER_SIZE];
 
   ssize_t bytes_received = recv_request(in_sockfd, buffer, sizeof(buffer));
@@ -183,7 +183,7 @@ void handle_client(int in_sockfd, MappingLists mapping_lists) {
   if (string_equals(request_type, string_literal("GET"))) {
     handle_get(&string_arena, request_arg, mapping_lists, in_sockfd);
   } else if (string_equals(request_type, string_literal("POST"))) {
-    handle_post(request_header_body, mapping_lists);
+    handle_post(mappings_arena, request_header_body, mapping_lists);
     handle_get(&string_arena, request_arg, mapping_lists, in_sockfd);  // Also send the requested file
   } else {
     printf("Ignoring unexpected request of type '%" Stringf "'\n", stringf_args(request_type));
@@ -194,12 +194,12 @@ void handle_client(int in_sockfd, MappingLists mapping_lists) {
 
 void web_server(void) {
   // Worryingly this arena getting filled up will crash the program. Uhhhh will fix later
-  Arena transactions_arena = arena_init(16384);
-  LinkNode *transactions = retrieve_transactions(&transactions_arena, string_literal("test.dat"));
+  Arena mappings_arena = arena_init(16384);
+  LinkNode *transactions = retrieve_transactions(&mappings_arena, string_literal("test.dat"));
   U32 num_add_transaction_inputs = 4;  // Placeholder
   MappingInput mapping_input = {.transactions = transactions,
                                 .num_add_transaction_inputs = &num_add_transaction_inputs};
-  const MappingLists mapping_lists = mapping_lists_init(&transactions_arena, mapping_input);
+  const MappingLists mapping_lists = mapping_lists_init(&mappings_arena, mapping_input);
 
   int server_sockfd = server_init(PORT);
   U32 backlog_size = 10;
@@ -224,7 +224,7 @@ void web_server(void) {
       printf("Accepted unknown address\n");
     }
 
-    handle_client(in_sockfd, mapping_lists);
+    handle_client(&mappings_arena, in_sockfd, mapping_lists);
 
     error_check(close(in_sockfd));
     printf("Closed connection\n");
@@ -232,7 +232,7 @@ void web_server(void) {
   }
 
   // I guess this is never hit :(
-  arena_free(&transactions_arena);
+  arena_free(&mappings_arena);
   error_check(close(server_sockfd));
   printf("Closed server\n");
 }
