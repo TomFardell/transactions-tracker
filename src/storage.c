@@ -19,8 +19,8 @@ void store_transaction(FILE *file, Transaction trans) {
   error_check_fread_fwrite(fwrite(&trans.amount, sizeof(trans.amount), 1, file), file);
 }
 
-void store_transactions(const String file_name, LinkNode *transactions) {
-  Arena file_path_arena = arena_init(32);
+void store_transactions(String file_name, const LinkNode *transactions) {
+  Arena file_path_arena = arena_init(64);
   String file_path = string_append(&file_path_arena, data_dir, file_name);
   FILE *file = error_check_ptr(fopen(string_get_cstring(&file_path_arena, file_path), "w"));
   arena_free(&file_path_arena);

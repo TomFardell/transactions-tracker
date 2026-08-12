@@ -13,3 +13,4 @@ const DayOfWeekFormat day_of_week_format = DAY_OF_WEEK_FORMAT_HIDDEN;
 const String parse_tag_opener = string_literal("<!--{{");
 const String parse_tag_closer = string_literal("}}-->");
 const String instruction_label = string_literal("*instruction");
+const String transactions_file = string_literal("transactions.dat");

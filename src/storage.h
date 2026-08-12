@@ -11,7 +11,7 @@ void store_string(FILE *file, String str);
 // Write a transaction to a given file
 void store_transaction(FILE *file, Transaction trans);
 // Store a linked list of transactions in a specified file
-void store_transactions(const String file_name, LinkNode *transactions);
+void store_transactions(String file_name, const LinkNode *transactions);
 
 // Read a string from a given file, storing the data on the given arena
 String retrieve_string(Arena *a, FILE *file);

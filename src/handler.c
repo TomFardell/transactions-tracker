@@ -190,6 +190,28 @@ static bool parse_into_location_compound(Arena *mappings_arena, void *location, 
   }
 }
 
+// Given a pointer to some data and its internal type, add the given integer to the data, returning success status
+static bool add_to_item(void *item, InternalType internal_type, I64 num) {
+  switch (internal_type) {
+    case (INTERNAL_TYPE_F32): {
+      *((F32 *)item) += num;
+      return true;
+    }
+    case (INTERNAL_TYPE_F64): {
+      *((F64 *)item) += num;
+      return true;
+    }
+    case (INTERNAL_TYPE_U32): {
+      *((U32 *)item) += num;
+      return true;
+    }
+    default: {
+      printf("Cannot add %" I64f " to item of internal type '%d'\n", num, (int)internal_type);
+      return false;
+    }
+  }
+}
+
 // Given a list mapping and a linked list of the relevant label-value pairs, parse the values for each label and
 // add the resulting element to the list mapping
 static bool add_to_list_mapping(Arena *mappings_arena, ListMapping list_mapping,
@@ -425,6 +447,36 @@ bool handle_post_data(Arena *mappings_arena, MappingLists mapping_lists, String 
 
     arena_free(&handler_arena);
     return all_groups_successful;
+    /*---------------------------------------------------------------------------------------------------------*/
+  } else if (string_equals(instruction_name, string_literal("*increment")) ||
+             string_equals(instruction_name, string_literal("*decrement"))) {
+    /*-------------------------*/
+    /* *increment & *decrement */
+    /*---------------------------------------------------------------------------------------------------------*/
+    if (linked_list_get_length(instruction_arguments) != 1) {
+      printf("Got '%" Stringf "' instruction with %" U64f " arguments\n", stringf_args(instruction_name),
+             linked_list_get_length(instruction_arguments));
+      goto return_false;
+    }
+
+    String item_name = linked_list_get_data_at_index(instruction_arguments, 0, String);
+    ItemMapping item_mapping = mapping_lists_locate_item_mapping(mapping_lists, item_name);
+    if (item_mapping.internal_type == INTERNAL_TYPE_NULL) {
+      printf("Couldn't locate item mapping '%" Stringf "'\n", stringf_args(item_name));
+      goto return_false;
+    }
+
+    bool success;
+    if (string_equals(instruction_name, string_literal("*increment"))) {
+      success = add_to_item(item_mapping.item, item_mapping.internal_type, 1);
+      printf("Incremented '%" Stringf "'\n", stringf_args(item_name));
+    } else {
+      success = add_to_item(item_mapping.item, item_mapping.internal_type, -1);
+      printf("Decremented '%" Stringf "'\n", stringf_args(item_name));
+    }
+
+    arena_free(&handler_arena);
+    return success;
     /*---------------------------------------------------------------------------------------------------------*/
   } else {
     printf("Got unrecognised instruction '%" Stringf "'\n", stringf_args(instruction_name));

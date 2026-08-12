@@ -141,7 +141,7 @@ void handle_post(Arena *a, const LinkNode *request_header_body, MappingLists map
   if (handle_post_data(a, mapping_lists, request_body)) {
     printf("POST request handled successfully\n");
   } else {
-    printf("POST request not handled\n");
+    printf("POST request not fully handled\n");
   }
 }
 
@@ -195,8 +195,8 @@ void handle_client(Arena *mappings_arena, int in_sockfd, MappingLists mapping_li
 void web_server(void) {
   // Worryingly this arena getting filled up will crash the program. Uhhhh will fix later
   Arena mappings_arena = arena_init(16384);
-  LinkNode *transactions = retrieve_transactions(&mappings_arena, string_literal("test.dat"));
-  U32 num_add_transaction_inputs = 4;  // Placeholder
+  LinkNode *transactions = retrieve_transactions(&mappings_arena, transactions_file);
+  U32 num_add_transaction_inputs = 1;
   MappingInput mapping_input = {.transactions = transactions,
                                 .num_add_transaction_inputs = &num_add_transaction_inputs};
   const MappingLists mapping_lists = mapping_lists_init(&mappings_arena, mapping_input);
@@ -225,6 +225,7 @@ void web_server(void) {
     }
 
     handle_client(&mappings_arena, in_sockfd, mapping_lists);
+    store_transactions(transactions_file, transactions);
 
     error_check(close(in_sockfd));
     printf("Closed connection\n");
