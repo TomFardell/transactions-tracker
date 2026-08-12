@@ -284,10 +284,18 @@ static String types_get_string_output(Arena *a, const void *item, InternalType i
     case DISPLAY_TYPE_CURRENCY: {
       switch (internal_type) {
         case (INTERNAL_TYPE_F32): {
-          return string_format(a, "£%.02" F32f, *((F32 *)item));
+          if (*((F32 *)item) >= 0) {
+            return string_format(a, "£%.02" F32f, *((F32 *)item));
+          } else {
+            return string_format(a, "-£%.02" F32f, -(*((F32 *)item)));
+          }
         }
         case (INTERNAL_TYPE_F64): {
-          return string_format(a, "£%.02" F64f, *((F64 *)item));
+          if (*((F32 *)item) >= 0) {
+            return string_format(a, "£%.02" F64f, *((F64 *)item));
+          } else {
+            return string_format(a, "-£%.02" F64f, -(*((F64 *)item)));
+          }
         }
         case (INTERNAL_TYPE_U32): {
           return string_format(a, "£%.02" U32f, *((U32 *)item));

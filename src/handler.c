@@ -87,13 +87,7 @@ static bool parse_into_location_simple(Arena *mappings_arena, void *location, In
         return false;
       }
 
-      // Should probably not be lazy and write a date checking function in the base layer. Maybe we even want a
-      // very generic date parsing method that can handle any format? That would be lovely but I can't be bothered
-      // so here we are
-      // TODO: Add to base layer at least
-      if ((year < MIN_YEAR || MAX_YEAR < year) || (month < MONTH_JAN || MONTH_DEC < month) ||
-          (day < 1 || month_get_days_in_month(month) < day) ||
-          (day == 29 && month == 2 && !year_is_leap_year(year))) {
+      if (!date_exists(day, month, year)) {
         printf("Got invalid date %" U32f "-%" U32f "-%" U32f "\n", year, month, day);
         return false;
       }
@@ -122,8 +116,15 @@ static bool parse_into_location_simple(Arena *mappings_arena, void *location, In
       return true;
     }
     case (INTERNAL_TYPE_STRING): {
-      // We copy here to ensure the string's underlying data has the correct lifetime
-      String result = string_copy(mappings_arena, value);
+      // I have a feeling that these escape characters might be browser-dependant
+      Arena replace_arena = arena_init(5 * value.len * sizeof(char));
+      String result = string_replace(&replace_arena, value, string_literal("+"), string_literal(" "));
+      result = string_replace(&replace_arena, result, string_literal("%26"), string_literal("&"));
+      result = string_replace(&replace_arena, result, string_literal("%3B"), string_literal(";"));
+      result = string_replace(&replace_arena, result, string_literal("%2C"), string_literal(","));
+      result = string_replace(&replace_arena, result, string_literal("%27"), string_literal("'"));
+      result = string_replace(mappings_arena, result, string_literal("%25"), string_literal("%"));
+      arena_free(&replace_arena);
 
       *((String *)location) = result;
       return true;
@@ -270,7 +271,6 @@ bool handle_post_data(Arena *mappings_arena, MappingLists mapping_lists, String 
 
   LinkNode *label_value_pairs = request_body_get_label_value_pairs(&handler_arena, request_body);
 
-  // TODO: Somehow figure out how to allow longer requests uhhhh
   U64 num_instructions =
       label_value_pairs_count_values_for_label(label_value_pairs, string_literal("*instruction"));
   if (num_instructions != 1) {
@@ -417,7 +417,7 @@ bool handle_post_data(Arena *mappings_arena, MappingLists mapping_lists, String 
         printf("Added group %" U64f " of labels and values to list mapping '%" Stringf "\n", group_num,
                stringf_args(list_name));
       } else {
-        printf("Unable add group %" U64f " of labels and values to list mapping '%" Stringf "\n", group_num,
+        printf("Unable add group %" U64f " of labels and values to list mapping '%" Stringf "'\n", group_num,
                stringf_args(list_name));
         all_groups_successful = false;
       }
@@ -425,7 +425,6 @@ bool handle_post_data(Arena *mappings_arena, MappingLists mapping_lists, String 
 
     arena_free(&handler_arena);
     return all_groups_successful;
-
     /*---------------------------------------------------------------------------------------------------------*/
   } else {
     printf("Got unrecognised instruction '%" Stringf "'\n", stringf_args(instruction_name));

@@ -20,7 +20,7 @@
 #include "parser.h"
 #include "storage.h"
 
-#define RECV_BUFFER_SIZE 1024
+#define RECV_BUFFER_SIZE 2048
 
 // Get whether a file can be accessed by the client
 bool can_access_file(const String file_path) {
