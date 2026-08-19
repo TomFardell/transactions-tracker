@@ -460,6 +460,7 @@ bool handle_post_data(Arena *mappings_arena, MappingLists mapping_lists, String 
     }
 
     String item_name = linked_list_get_data_at_index(instruction_arguments, 0, String);
+    // TODO: Make this work with member mappings too
     ItemMapping item_mapping = mapping_lists_locate_item_mapping(mapping_lists, item_name);
     if (item_mapping.internal_type == INTERNAL_TYPE_NULL) {
       printf("Couldn't locate item mapping '%" Stringf "'\n", stringf_args(item_name));

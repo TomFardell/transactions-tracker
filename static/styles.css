@@ -25,3 +25,11 @@ body {
   padding: 2px
 }
 
+.button {
+  border: medium solid lightGrey;
+  border-radius: 3px;
+  background-color: lightGrey;
+  padding: 2px;
+  margin: 5px 2px;
+}
+

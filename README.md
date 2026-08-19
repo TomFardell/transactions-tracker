@@ -159,6 +159,7 @@ It is worth noting that more complex conditions, including `else` statements are
 The `#iter` command takes a non-negative integer item as its only argument and is used to repeat a region of HTML a certain number of times. We can retrieve which iteration we are in within the repeated block using `this`, which runs from 0 (inclusive) to the value of the argument (exclusive). We use a closing `/iter` tag to encompass the block of HTML that will be repeated.
 
 Suppose we have the following value in the code:
+
 ```c
 // Pseudocode
 U32 num_iterations = 4;
@@ -185,6 +186,99 @@ After parsing, we get the following:
 
 ## HTTP POST Method Handling
 
-The other half of making the website dynamic is to use particular HTML forms to send instructions back to the code.
+The server also listens for POST requests, which can be used to give instructions to the server. The intention is that these POST requests come from HTML forms on the site.
 
-I've not thought about how this will work yet, but there will probably be some commands to add items to lists, as well as to update values in the code.
+### Syntax
+
+POST requests should have a request body containing label-value pairs separated by `&`s, e.g.:
+
+```
+label1=value1&label2.member1=value2&label2.member2=value3&*instruction=*<instruction>
+
+```
+
+Which could be the POST body when the following HTML form is submitted via its button:
+
+```html
+<form method="post">
+    <input type="text" name="label1">
+    <input type="text" name="label2.member1">
+    <input type="text" name="label2.member2">
+    <button type="submit" name="*instruction" value="*<instruction>">Click me</button>
+</form>
+```
+
+Importantly, for the code to be able to do anything with this request, one label-value pair should have the label '*instruction'. The value passed for this label determines what the server should do with the form data. Note, it makes sense to put the instruction type as the name of a submit button. Adding multiple submit buttons to a single form can be used to give the form different behaviours depending on which button is pressed.
+
+### Instructions
+
+Instruction values should have the following syntax. The instruction itself comes first and begins with a `*`. This is followed by a list of arguments, all separated by `-`s. For example:
+
+
+```
+*instruction=*do_something-arg1-arg2
+
+```
+
+The following are instructions.
+
+---
+
+#### *add_to
+
+The `*add_to` instruction is used to add form data to a list in the program. It takes a single argument, the name of a list mapping in the code. For example:
+
+```
+*instruction=*add_to-my_list
+```
+
+This instruction uses the list mapping's item internal type to identify which members are needed to initialise an instance of that type. It then looks for groups of these in the POST body. Each group has its values parsed to create a new element in the mapped list. We use the `this` keyword in labels to reference the element that is to be added to the list.
+
+For example, suppose we have a list mapping called `my_list` containing elements of some struct defined as follows:
+
+```c
+typedef struct MyStruct {
+    String member1;
+    U32 member2;
+} MyStruct;
+```
+
+The handler could then parse an incoming POST request looking something like:
+
+```
+*instruction=*add_to-my_list&this.member1=hello&this.member2=23&this.member1=hi&this.member2=11
+```
+
+This would add two `MyStruct` instances to the end of `my_list`. Note that while the order of the label-value pairs in the POST body matters for splitting members into groups, the order of members within groups does not matter. The above request could have been sent by the following HTML form:
+
+```html
+<form method="post">
+    <input type="text" name="this.member1">
+    <input type="text" name="this.member2">
+    <input type="text" name="this.member1">
+    <input type="text" name="this.member2">
+    <button type="submit" name="*instruction" value="*add_to-my_list">Add</button>
+</form>
+```
+
+Note that if one group fails to be parsed (for example, receiving text when expecting a number), non-failing groups would still have their resulting elements added to the list.
+
+---
+
+#### *increment & *decrement
+
+The `*increment` and `*decrement` instructions are used to increment and decrement a value pointed to by an item or member mapping. These instructions take a single argument, the name of the mapping to be incremented/decremented. For example,
+
+
+```
+*instruction=*increment-my_num
+```
+
+These instructions ignore any other labels or values within the POST body.
+
+
+---
+
+### Errors
+
+Whereas the HTML parsing functionality simply crashes the program when running into a syntax error, the POST request handling code should fail more gracefully, as anybody could send it any request. For the most part, the server is able to ignore requests it doesn't understand. This includes instances where it attempts to parse user data into a certain type and cannot.
