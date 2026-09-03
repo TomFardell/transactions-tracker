@@ -14,7 +14,7 @@
 #include "sys/stat.h"
 #include "transaction.h"
 
-MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input) {
+MappingLists mapping_lists_init(Arena *a, MappingData *mapping_data) {
   MappingLists result = {arena_alloc_single(a, LinkNode), arena_alloc_single(a, LinkNode),
                          arena_alloc_single(a, LinkNode)};
   linked_list_init(result.list_mappings);
@@ -24,7 +24,7 @@ MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input) {
   ListMappingNode *list_mapping_node;
 
   list_mapping_node = arena_alloc_single(a, ListMappingNode);
-  list_mapping_node->data.items = mapping_input.transactions;
+  list_mapping_node->data.items = mapping_data->global.transactions;
   list_mapping_node->data.name = string_literal("transactions");
   list_mapping_node->data.item_struct_name = string_literal("Transaction");
   list_mapping_node->data.item_display_type = DISPLAY_TYPE_NONE;
@@ -34,7 +34,23 @@ MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input) {
   ItemMappingNode *item_mapping_node;
 
   item_mapping_node = arena_alloc_single(a, ItemMappingNode);
-  item_mapping_node->data.item = mapping_input.num_add_transaction_inputs;
+  item_mapping_node->data.item = &mapping_data->index.min_filter_date;
+  item_mapping_node->data.name = string_literal("min_filter_date");
+  item_mapping_node->data.struct_name = string_literal("Date");
+  item_mapping_node->data.display_type = DISPLAY_TYPE_DATE;
+  item_mapping_node->data.internal_type = INTERNAL_TYPE_DATE;
+  linked_list_push_back(result.item_mappings, &item_mapping_node->node);
+
+  item_mapping_node = arena_alloc_single(a, ItemMappingNode);
+  item_mapping_node->data.item = &mapping_data->index.max_filter_date;
+  item_mapping_node->data.name = string_literal("max_filter_date");
+  item_mapping_node->data.struct_name = string_literal("Date");
+  item_mapping_node->data.display_type = DISPLAY_TYPE_DATE;
+  item_mapping_node->data.internal_type = INTERNAL_TYPE_DATE;
+  linked_list_push_back(result.item_mappings, &item_mapping_node->node);
+
+  item_mapping_node = arena_alloc_single(a, ItemMappingNode);
+  item_mapping_node->data.item = &mapping_data->add.num_add_transaction_inputs;
   item_mapping_node->data.name = string_literal("num_add_transaction_inputs");
   item_mapping_node->data.struct_name = string_literal("U32");
   item_mapping_node->data.display_type = DISPLAY_TYPE_NUMBER;
@@ -241,7 +257,7 @@ static U64 find_closing_tag_pos(String data, String tag_name) {
       }
     }
 
-    cursor_pos += next_tag_closer_pos + parse_tag_closer.len + 1;
+    cursor_pos += next_tag_closer_pos + parse_tag_closer.len;
     remaining_data = string_init_substring(data, cursor_pos, data.len);
   }
 }

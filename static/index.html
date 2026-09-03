@@ -11,6 +11,8 @@
 	<body>
 		<h1 class="main-title">Transactions Tracker</h1>
 		<p class="info"><b>Total</b>: <!--{{#sum transactions.amount}}--></p>
+		<p class="info"><b>Min date</b>: <!--{{min_filter_date}}--></p>
+		<p class="info"><b>Max date</b>: <!--{{max_filter_date}}--></p>
 
 		<h2 class="sub-title">History</h2>
 		<table class="table">
@@ -20,11 +22,15 @@
 				<th>Amount</th>
 			</tr>
 			<!--{{#each transactions}}-->
+			<!--{{#if min_filter_date <= this.date}}-->
+			<!--{{#if this.date <= max_filter_date}}-->
 			<tr>
 				<td><!--{{this.desc}}--></td>
 				<td><!--{{this.date}}--></td>
 				<td><!--{{this.amount}}--></td>
 			</tr>
+			<!--{{/if}}-->
+			<!--{{/if}}-->
 			<!--{{/each}}-->
 		</table>
 	</body>

@@ -1,15 +1,26 @@
 #ifndef PARSER_H
 #define PARSER_H
 
+#include "base/date.h"
 #include "base/definitions.h"
 #include "base/memory.h"
 #include "base/string.h"
 
-// Struct to be filled with pointers for the underlying data that is being mapped into
-typedef struct MappingInput {
-  LinkNode *transactions;
-  U32 *num_add_transaction_inputs;
-} MappingInput;
+// Struct to store all data that interacts with the frontend, split into nested structs for each page
+typedef struct MappedData {
+  struct {
+    LinkNode *transactions;
+  } global;
+
+  struct {
+    Date min_filter_date;
+    Date max_filter_date;
+  } index;
+
+  struct {
+    U32 num_add_transaction_inputs;
+  } add;
+} MappingData;
 
 // How to display the mapping
 typedef enum DisplayType {
@@ -70,7 +81,7 @@ typedef struct MappingLists {
 } MappingLists;
 
 // Initialise the mapping lists required by the parser, allocating them on the passed arena
-MappingLists mapping_lists_init(Arena *a, MappingInput mapping_input);
+MappingLists mapping_lists_init(Arena *a, MappingData *mapping_data);
 
 // Locate a list mapping of a given name in the passed mapping lists. Returns a list mapping with a null item
 // internal type if not located

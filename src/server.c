@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "base/data.h"
+#include "base/date.h"
 #include "base/definitions.h"
 #include "base/string.h"
 #include "constants.h"
@@ -195,11 +196,16 @@ void handle_client(Arena *mappings_arena, int in_sockfd, MappingLists mapping_li
 void web_server(void) {
   // Worryingly this arena getting filled up will crash the program. Uhhhh will fix later
   Arena mappings_arena = arena_init(16384);
-  LinkNode *transactions = retrieve_transactions(&mappings_arena, transactions_file);
-  U32 num_add_transaction_inputs = 1;
-  MappingInput mapping_input = {.transactions = transactions,
-                                .num_add_transaction_inputs = &num_add_transaction_inputs};
-  const MappingLists mapping_lists = mapping_lists_init(&mappings_arena, mapping_input);
+
+  MappingData mapping_data = {
+      .global.transactions = retrieve_transactions(&mappings_arena, transactions_file),
+
+      .index.min_filter_date = date_add_months(date_init_today(), -3),
+      .index.max_filter_date = date_init_today(),
+
+      .add.num_add_transaction_inputs = 1,
+  };
+  const MappingLists mapping_lists = mapping_lists_init(&mappings_arena, &mapping_data);
 
   int server_sockfd = server_init(PORT);
   U32 backlog_size = 10;
@@ -225,7 +231,7 @@ void web_server(void) {
     }
 
     handle_client(&mappings_arena, in_sockfd, mapping_lists);
-    store_transactions(transactions_file, transactions);
+    store_transactions(transactions_file, mapping_data.global.transactions);
 
     error_check(close(in_sockfd));
     printf("Closed connection\n");
